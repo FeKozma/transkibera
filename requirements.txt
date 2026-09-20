@@ -1,3 +1,10 @@
 flask
 faster-whisper
 gunicorn
+
+# Speaker diarization. CPU-only torch build to avoid pulling in unused CUDA
+# wheels (they're huge and this app never touches a GPU).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchaudio
+pyannote.audio>=3.1,<4

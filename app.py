@@ -31,7 +31,15 @@ CPU_THREADS = int(os.environ.get("WHISPER_CPU_THREADS", "1"))
 IDLE_UNLOAD_SECONDS = int(os.environ.get("WHISPER_IDLE_UNLOAD_SECONDS", "600"))
 MODELS_DIR = "/models"
 
-_models: dict[str, WhisperModel] = {}
+# pyannote's pretrained pipeline is gated on Hugging Face: an account must
+# accept the terms at huggingface.co/pyannote/speaker-diarization-3.1 (and
+# .../segmentation-3.0) and generate a read token, passed in here as HF_TOKEN.
+DIARIZATION_MODEL = os.environ.get("DIARIZATION_MODEL", "pyannote/speaker-diarization-3.1")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+DIARIZATION_KEY = "__diarization__"
+SPEAKER_COLORS = ["#7c6fff", "#4ade80", "#facc15", "#f87171", "#38bdf8", "#f472b6", "#fb923c", "#a3e635"]
+
+_models: dict[str, object] = {}
 _last_used: dict[str, float] = {}
 _models_lock = threading.Lock()
 
@@ -81,6 +89,55 @@ def _model_evictor() -> None:
 threading.Thread(target=_model_evictor, daemon=True).start()
 
 
+def get_diarization_pipeline():
+    with _models_lock:
+        if DIARIZATION_KEY not in _models:
+            # Imported lazily: pyannote pulls in torch, which is a much
+            # heavier/larger runtime than faster-whisper's ctranslate2 backend,
+            # so we only pay for it once diarization is actually requested.
+            import torch
+            from pyannote.audio import Pipeline
+
+            torch.set_num_threads(CPU_THREADS)
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=HF_TOKEN)
+            pipeline.to(torch.device("cpu"))
+            _models[DIARIZATION_KEY] = pipeline
+        _last_used[DIARIZATION_KEY] = time.monotonic()
+    return _models[DIARIZATION_KEY]
+
+
+def diarize(audio_path: str) -> list[tuple[float, float, str]]:
+    pipeline = get_diarization_pipeline()
+    diarization = pipeline(audio_path)
+    turns = [(turn.start, turn.end, speaker) for turn, _, speaker in diarization.itertracks(yield_label=True)]
+    _touch_model(DIARIZATION_KEY)
+    return turns
+
+
+def _assign_speakers(lines: list[dict], turns: list[tuple[float, float, str]]) -> dict[str, str]:
+    """Labels each whisper segment with the diarization speaker it overlaps
+    most with, renaming raw pyannote labels to "Talare 1", "Talare 2"... in
+    order of first appearance. Returns a {label: color} map for display."""
+    speaker_order: list[str] = []
+    for seg in lines:
+        best_speaker, best_overlap = None, 0.0
+        for start, end, speaker in turns:
+            overlap = min(seg["end_s"], end) - max(seg["start_s"], start)
+            if overlap > best_overlap:
+                best_overlap, best_speaker = overlap, speaker
+        if best_speaker is None:
+            seg["speaker"] = None
+            continue
+        if best_speaker not in speaker_order:
+            speaker_order.append(best_speaker)
+        seg["speaker"] = f"Talare {speaker_order.index(best_speaker) + 1}"
+
+    return {
+        f"Talare {i + 1}": SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
+        for i in range(len(speaker_order))
+    }
+
+
 def extract_audio(video_path: str) -> str:
     out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     out.close()
@@ -92,7 +149,7 @@ def extract_audio(video_path: str) -> str:
     return out.name
 
 
-def run_transcription(job_id: str, file_path: str, language: str | None, model_name: str, is_video: bool):
+def run_transcription(job_id: str, file_path: str, language: str | None, model_name: str, is_video: bool, diarize_flag: bool = False):
     audio_path = None
     jobs[job_id]["status"] = "processing"
     try:
@@ -114,13 +171,24 @@ def run_transcription(job_id: str, file_path: str, language: str | None, model_n
 
         lines = [{"start": _fmt(s.start), "end": _fmt(s.end), "start_s": s.start, "end_s": s.end, "text": s.text.strip()} for s in segments]
         _touch_model(model_name)
+
+        speaker_colors: dict[str, str] = {}
+        if diarize_flag and lines:
+            jobs[job_id]["status_text"] = "Identifierar talare…"
+            turns = diarize(transcribe_path)
+            speaker_colors = _assign_speakers(lines, turns)
+
+        text = "\n".join(
+            (f"{s['speaker']}: {s['text']}" if s.get("speaker") else s["text"]) for s in lines
+        )
         jobs[job_id] = {
             "status": "done",
-            "text": "\n".join(s["text"] for s in lines),
+            "text": text,
             "segments": lines,
             "language": info.language,
             "duration": round(info.duration, 1),
             "model": model_name,
+            "speaker_colors": speaker_colors,
         }
     except Exception as e:
         jobs[job_id] = {"status": "error", "error": str(e)}
@@ -147,11 +215,19 @@ def _fmt(seconds: float) -> str:
 
 
 def _build_srt(job: dict) -> str:
+    colors = job.get("speaker_colors") or {}
     rows = []
     for i, seg in enumerate(job.get("segments", []), 1):
+        speaker = seg.get("speaker")
+        text = seg["text"]
+        if speaker:
+            text = f"{speaker}: {text}"
+            color = colors.get(speaker)
+            if color:
+                text = f'<font color="{color}">{text}</font>'
         rows.append(str(i))
         rows.append(f"{_fmt_srt(seg['start_s'])} --> {_fmt_srt(seg['end_s'])}")
-        rows.append(seg["text"])
+        rows.append(text)
         rows.append("")
     return "\n".join(rows)
 
@@ -166,9 +242,9 @@ def _sanitize_filename(name: str, ext: str) -> str:
 
 def _queue_worker():
     while True:
-        job_id, file_path, language, model_name, is_video = job_queue.get()
+        job_id, file_path, language, model_name, is_video, diarize_flag = job_queue.get()
         try:
-            run_transcription(job_id, file_path, language, model_name, is_video)
+            run_transcription(job_id, file_path, language, model_name, is_video, diarize_flag)
         finally:
             job_queue.task_done()
 
@@ -211,14 +287,17 @@ def upload_chunk():
 
 @app.route("/transcribe-assembled", methods=["POST"])
 def transcribe_assembled():
-    upload_id  = request.json.get("upload_id")
-    language   = request.json.get("language") or None
-    model_name = request.json.get("model", "medium")
+    upload_id   = request.json.get("upload_id")
+    language    = request.json.get("language") or None
+    model_name  = request.json.get("model", "medium")
+    diarize_flag = bool(request.json.get("diarize"))
 
     if language == "auto":
         language = None
     if model_name not in ALLOWED_MODELS:
         return jsonify({"error": "Okänd modell"}), 400
+    if diarize_flag and not HF_TOKEN:
+        return jsonify({"error": "Talaridentifiering är inte konfigurerad på servern (HF_TOKEN saknas)"}), 400
 
     info = pending_uploads.pop(upload_id, None)
     if not info:
@@ -236,7 +315,7 @@ def transcribe_assembled():
         "status_text": f"Väntar i kö ({job_queue.qsize() + 1})…",
     }
 
-    job_queue.put((job_id, info["path"], language, model_name, is_video))
+    job_queue.put((job_id, info["path"], language, model_name, is_video, diarize_flag))
 
     return jsonify({"job_id": job_id})
 

@@ -346,6 +346,22 @@
     .seg-row:last-child { border-bottom: none; }
     .seg-time { color: #7c6fff; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 90px; }
     .seg-text { color: #ccc; }
+    .seg-speaker { font-weight: 700; margin-right: 0.4rem; }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      padding: 0.65rem 0.9rem;
+      cursor: pointer;
+    }
+
+    .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+    .checkbox-row .cr-label { font-size: 0.85rem; color: #e8e8f0; }
+    .checkbox-row .cr-desc { font-size: 0.75rem; color: #666; margin-top: 0.1rem; }
 
     footer {
       margin-top: 2rem;
@@ -492,6 +508,14 @@
         </select>
       </div>
 
+      <label class="checkbox-row">
+        <input type="checkbox" id="diarizeCheck" />
+        <span>
+          <div class="cr-label">Identifiera talare</div>
+          <div class="cr-desc">Färgkodar olika röster &middot; tar längre tid</div>
+        </span>
+      </label>
+
       <button class="action-btn" id="transcribeBtn" disabled>Starta transkribering</button>
 
       <p class="status" id="status"></p>
@@ -538,6 +562,7 @@
     const zipSrtBtn      = document.getElementById('zipSrtBtn');
     const segmentsToggle = document.getElementById('segmentsToggle');
     const segmentsBox    = document.getElementById('segmentsBox');
+    const diarizeCheck   = document.getElementById('diarizeCheck');
 
     const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.flv', '.ts', '.mts', '.m2ts']);
     const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
@@ -705,12 +730,13 @@
       transcribeBtn.disabled = true;
       const model = document.querySelector('input[name="model"]:checked')?.value || 'medium';
       const language = langSelect.value;
+      const diarize = diarizeCheck.checked;
 
       setStatus('loading', `<span class="spinner"></span>Laddar upp ${waiting.length} fil(er)…`);
 
       for (const item of waiting) {
         try {
-          await uploadAndEnqueue(item, model, language);
+          await uploadAndEnqueue(item, model, language, diarize);
         } catch (err) {
           item.status = 'error';
           item.statusText = err.message || 'Uppladdningsfel';
@@ -724,7 +750,7 @@
       startPolling();
     });
 
-    async function uploadAndEnqueue(item, model, language) {
+    async function uploadAndEnqueue(item, model, language, diarize) {
       const file = item.file;
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
       const uploadId = crypto.randomUUID();
@@ -755,7 +781,7 @@
       const res = await fetch('/transcribe-assembled', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId, language, model }),
+        body: JSON.stringify({ upload_id: uploadId, language, model, diarize }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Serverfel');
@@ -811,19 +837,26 @@
       const dur = data.duration ? fmtDuration(data.duration) : '';
       const modelLabels = { base: 'Snabb', medium: 'Medel', 'large-v3-turbo': 'Bäst' };
       const usedModel = modelLabels[data.model] || data.model || '';
+      const speakerCount = data.speaker_colors ? Object.keys(data.speaker_colors).length : 0;
       resultMeta.innerHTML =
         `<span>Fil: <span>${escHtml(currentFilename)}</span></span>` +
         `<span>Detekterat språk: <span>${lang}</span></span>` +
         (dur ? `<span>Längd: <span>${dur}</span></span>` : '') +
-        (usedModel ? `<span>Modell: <span>${usedModel}</span></span>` : '');
+        (usedModel ? `<span>Modell: <span>${usedModel}</span></span>` : '') +
+        (speakerCount ? `<span>Talare: <span>${speakerCount}</span></span>` : '');
 
       segmentsBox.classList.remove('open');
       segmentsToggle.textContent = 'Visa tidsstämplar';
       if (data.segments?.length) {
         segmentsToggle.style.display = 'inline';
-        segmentsBox.innerHTML = data.segments.map(s =>
-          `<div class="seg-row"><span class="seg-time">${s.start} → ${s.end}</span><span class="seg-text">${escHtml(s.text)}</span></div>`
-        ).join('');
+        const colors = data.speaker_colors || {};
+        segmentsBox.innerHTML = data.segments.map(s => {
+          const color = s.speaker && colors[s.speaker];
+          const speakerTag = s.speaker
+            ? `<span class="seg-speaker" style="color:${color || '#7c6fff'}">${escHtml(s.speaker)}</span>`
+            : '';
+          return `<div class="seg-row"><span class="seg-time">${s.start} → ${s.end}</span><span class="seg-text">${speakerTag}${escHtml(s.text)}</span></div>`;
+        }).join('');
       } else {
         segmentsToggle.style.display = 'none';
         segmentsBox.innerHTML = '';
