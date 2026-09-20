@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transkibera</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #0f0f13;
+      color: #e8e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 2.5rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.35rem;
+    }
+
+    h1 span { color: #7c6fff; }
+
+    .subtitle {
+      color: #888;
+      font-size: 0.95rem;
+    }
+
+    .badge {
+      display: inline-block;
+      margin-top: 0.5rem;
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 20px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.75rem;
+      color: #7c6fff;
+    }
+
+    .layout {
+      display: flex;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 1040px;
+      align-items: flex-start;
+    }
+
+    .card {
+      background: #18181f;
+      border: 1px solid #2a2a38;
+      border-radius: 16px;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .upload-col { flex: 0 0 420px; }
+    .result-col { flex: 1; min-width: 0; }
+
+    .drop-zone {
+      border: 2px dashed #2e2e42;
+      border-radius: 12px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #7c6fff;
+      background: #1e1e2e;
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .drop-icon { font-size: 2.5rem; margin-bottom: 0.75rem; display: block; }
+    .drop-label { font-size: 0.9rem; color: #aaa; }
+    .drop-label strong { color: #e8e8f0; }
+    .drop-label small { display: block; margin-top: 0.25rem; font-size: 0.78rem; color: #666; }
+
+    .queue-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .queue-list:empty::before {
+      content: "Inga filer i kön";
+      color: #555;
+      font-size: 0.85rem;
+    }
+
+    .queue-row {
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 8px;
+      padding: 0.5rem 0.65rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+    }
+
+    .queue-row.done { border-color: #1a3a2a; }
+    .queue-row.error { border-color: #3a1515; }
+    .queue-row.active { border-color: #3a3060; }
+
+    .qf-icon { flex-shrink: 0; }
+
+    .qf-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #e8e8f0;
+    }
+
+    .qf-size { color: #666; font-size: 0.72rem; flex-shrink: 0; }
+
+    .qf-status {
+      color: #888;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+      min-width: 100px;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .qf-status.error { color: #f87171; }
+    .qf-status.done { color: #4ade80; }
+
+    .qf-actions { display: flex; gap: 0.3rem; flex-shrink: 0; }
+
+    .qf-btn {
+      background: #12121a;
+      border: 1px solid #2a2a38;
+      border-radius: 6px;
+      color: #aaa;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.45rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .qf-btn:hover:not(:disabled) { border-color: #7c6fff; color: #e8e8f0; }
+    .qf-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .qf-btn.qf-remove:hover:not(:disabled) { border-color: #f87171; color: #f87171; }
+
+    .mini-spinner {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border: 2px solid #444;
+      border-top-color: #aaa;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    label.field-label {
+      font-size: 0.8rem;
+      color: #888;
+      display: block;
+      margin-bottom: 0.35rem;
+    }
+
+    select {
+      width: 100%;
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 8px;
+      color: #e8e8f0;
+      padding: 0.55rem 0.75rem;
+      font-size: 0.9rem;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      cursor: pointer;
+    }
+
+    select:focus { outline: none; border-color: #7c6fff; }
+
+    button.action-btn {
+      width: 100%;
+      padding: 0.85rem;
+      background: #7c6fff;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+
+    button.action-btn:hover:not(:disabled) { background: #6a5ee8; }
+    button.action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status {
+      font-size: 0.875rem;
+      text-align: center;
+      min-height: 1.25rem;
+    }
+
+    .status.error { color: #f87171; }
+    .status.success { color: #4ade80; }
+    .status.loading { color: #aaa; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #555;
+      border-top-color: #aaa;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .result-title { font-size: 0.9rem; font-weight: 600; color: #aaa; }
+
+    .result-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+    .icon-btn {
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 8px;
+      color: #aaa;
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 0.35rem 0.7rem;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .icon-btn:hover:not(:disabled) { border-color: #7c6fff; color: #e8e8f0; }
+    .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .download-all-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: #1a1a2e;
+      border: 1px solid #3a3060;
+      border-radius: 10px;
+      padding: 0.6rem 0.85rem;
+      flex-wrap: wrap;
+    }
+
+    .download-all-bar .dab-label {
+      font-size: 0.82rem;
+      color: #a89fff;
+      flex: 1;
+      min-width: 120px;
+    }
+
+    .result-meta {
+      font-size: 0.78rem;
+      color: #666;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .result-meta span { color: #888; }
+
+    textarea#resultText {
+      width: 100%;
+      height: 340px;
+      background: #0f0f13;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      color: #e8e8f0;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      padding: 1rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    textarea#resultText:focus { outline: none; border-color: #7c6fff; }
+
+    textarea#resultText::placeholder { color: #444; }
+
+    .segments-toggle {
+      font-size: 0.8rem;
+      color: #7c6fff;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .segments-box {
+      display: none;
+      background: #0f0f13;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      padding: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+    }
+
+    .segments-box.open { display: block; }
+
+    .seg-row { display: flex; gap: 0.75rem; padding: 0.3rem 0; border-bottom: 1px solid #1e1e2e; }
+    .seg-row:last-child { border-bottom: none; }
+    .seg-time { color: #7c6fff; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 90px; }
+    .seg-text { color: #ccc; }
+
+    footer {
+      margin-top: 2rem;
+      color: #444;
+      font-size: 0.78rem;
+    }
+
+    .model-picker {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .model-option {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      padding: 0.65rem 0.9rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .model-option:has(input:checked) {
+      border-color: #7c6fff;
+      background: #1a1a2e;
+    }
+
+    .model-option input[type="radio"] { display: none; }
+
+    .model-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid #444;
+      flex-shrink: 0;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .model-option:has(input:checked) .model-dot {
+      border-color: #7c6fff;
+      background: #7c6fff;
+    }
+
+    .model-info { flex: 1; min-width: 0; }
+
+    .model-name {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #e8e8f0;
+    }
+
+    .model-desc {
+      font-size: 0.75rem;
+      color: #666;
+      margin-top: 0.1rem;
+    }
+
+    .model-speed {
+      font-size: 0.72rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 20px;
+      background: #12121a;
+      border: 1px solid #2a2a38;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .speed-fast { color: #4ade80; border-color: #1a3a2a; background: #0d1f15; }
+    .speed-mid  { color: #facc15; border-color: #3a3010; background: #1f1c0d; }
+    .speed-slow { color: #f87171; border-color: #3a1515; background: #1f0d0d; }
+
+    @media (max-width: 760px) {
+      .layout { flex-direction: column; }
+      .upload-col { flex: none; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Transkri<span>bera</span></h1>
+    <p class="subtitle">Lokal AI-transkription av ljud &amp; video</p>
+    <span class="badge">Whisper &middot; körs lokalt</span>
+  </header>
+
+  <div class="layout">
+    <div class="card upload-col">
+      <div class="drop-zone" id="dropZone">
+        <span class="drop-icon">🎙️</span>
+        <p class="drop-label"><strong>Klicka eller dra hit filer</strong></p>
+        <p class="drop-label"><small>MP3, MP4, WAV, M4A, OGG, FLAC, MKV, WEBM… (flera filer i taget)</small></p>
+        <input type="file" id="fileInput" multiple
+          accept=".mp3,.mp4,.wav,.m4a,.ogg,.flac,.webm,.mkv,.avi,.mov,.wma,.aac,audio/*,video/*" />
+      </div>
+
+      <div class="queue-list" id="queueList"></div>
+
+      <div>
+        <label class="field-label">Modell</label>
+        <div class="model-picker">
+          <label class="model-option">
+            <input type="radio" name="model" value="base" />
+            <span class="model-dot"></span>
+            <span class="model-info">
+              <div class="model-name">Snabb</div>
+              <div class="model-desc">base &middot; 145 MB &middot; snabb, lägre precision</div>
+            </span>
+            <span class="model-speed speed-fast">Snabb</span>
+          </label>
+          <label class="model-option">
+            <input type="radio" name="model" value="medium" checked />
+            <span class="model-dot"></span>
+            <span class="model-info">
+              <div class="model-name">Medel</div>
+              <div class="model-desc">medium &middot; 1.5 GB &middot; bra balans</div>
+            </span>
+            <span class="model-speed speed-mid">Medel</span>
+          </label>
+          <label class="model-option">
+            <input type="radio" name="model" value="large-v3-turbo" />
+            <span class="model-dot"></span>
+            <span class="model-info">
+              <div class="model-name">Bäst</div>
+              <div class="model-desc">large-v3-turbo &middot; 1.6 GB &middot; bäst kvalitet</div>
+            </span>
+            <span class="model-speed speed-slow">Långsam</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label class="field-label" for="langSelect">Språk</label>
+        <select id="langSelect">
+          <option value="auto">Automatisk igenkänning</option>
+          <option value="sv" selected>Svenska</option>
+          <option value="en">Engelska</option>
+          <option value="no">Norska</option>
+          <option value="da">Danska</option>
+          <option value="fi">Finska</option>
+          <option value="de">Tyska</option>
+          <option value="fr">Franska</option>
+          <option value="es">Spanska</option>
+        </select>
+      </div>
+
+      <button class="action-btn" id="transcribeBtn" disabled>Starta transkribering</button>
+
+      <p class="status" id="status"></p>
+    </div>
+
+    <div class="card result-col">
+      <div class="result-header">
+        <span class="result-title">Resultat</span>
+        <div class="result-actions">
+          <button class="icon-btn" id="copyBtn" disabled>Kopiera</button>
+          <button class="icon-btn" id="downloadBtn" disabled>Ladda ner .txt</button>
+          <button class="icon-btn" id="srtBtn" disabled>Ladda ner .srt</button>
+        </div>
+      </div>
+
+      <div class="download-all-bar">
+        <span class="dab-label">Ladda ner alla klara filer som zip:</span>
+        <button class="icon-btn" id="zipTxtBtn" disabled>Alla .txt (.zip)</button>
+        <button class="icon-btn" id="zipSrtBtn" disabled>Alla .srt (.zip)</button>
+      </div>
+
+      <div class="result-meta" id="resultMeta"></div>
+      <textarea id="resultText" placeholder="Texten visas här när transkriptionen är klar…" readonly></textarea>
+      <button class="segments-toggle" id="segmentsToggle" style="display:none">Visa tidsstämplar</button>
+      <div class="segments-box" id="segmentsBox"></div>
+    </div>
+  </div>
+
+  <footer>Powered by OpenAI Whisper (faster-whisper) &middot; appzma.com</footer>
+
+  <script>
+    const dropZone       = document.getElementById('dropZone');
+    const fileInput      = document.getElementById('fileInput');
+    const queueListEl    = document.getElementById('queueList');
+    const langSelect     = document.getElementById('langSelect');
+    const transcribeBtn  = document.getElementById('transcribeBtn');
+    const statusEl       = document.getElementById('status');
+    const resultText     = document.getElementById('resultText');
+    const resultMeta     = document.getElementById('resultMeta');
+    const copyBtn        = document.getElementById('copyBtn');
+    const downloadBtn    = document.getElementById('downloadBtn');
+    const srtBtn         = document.getElementById('srtBtn');
+    const zipTxtBtn      = document.getElementById('zipTxtBtn');
+    const zipSrtBtn      = document.getElementById('zipSrtBtn');
+    const segmentsToggle = document.getElementById('segmentsToggle');
+    const segmentsBox    = document.getElementById('segmentsBox');
+
+    const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.flv', '.ts', '.mts', '.m2ts']);
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
+
+    let queueItems = []; // { id, file, filename, ext, status, statusText, jobId, data, error }
+    let currentJobId    = null;
+    let currentFilename = '';
+    let currentLanguage = '';
+    let previewId       = null;
+    let pollHandle       = null;
+    let uploadRunning     = false;
+
+    function isVideo(name) {
+      const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+      return VIDEO_EXTS.has(ext);
+    }
+
+    function fmtSize(b) {
+      if (b > 1e9) return (b / 1e9).toFixed(1) + ' GB';
+      if (b > 1e6) return (b / 1e6).toFixed(1) + ' MB';
+      return (b / 1e3).toFixed(0) + ' KB';
+    }
+
+    function fmtDuration(s) {
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+      if (h) return `${h}h ${m}m`;
+      if (m) return `${m}m ${sec}s`;
+      return `${sec}s`;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function setStatus(type, msg) {
+      statusEl.className = 'status ' + type;
+      statusEl.innerHTML = msg;
+    }
+
+    function addFiles(fileList) {
+      for (const file of fileList) {
+        const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+        queueItems.push({
+          id: crypto.randomUUID(),
+          file,
+          filename: file.name,
+          ext,
+          status: 'waiting',
+          statusText: 'Väntar…',
+          jobId: null,
+          data: null,
+          error: null,
+        });
+      }
+      renderQueue();
+      updateStartButton();
+    }
+
+    function updateStartButton() {
+      const hasWaiting = queueItems.some(it => it.status === 'waiting');
+      transcribeBtn.disabled = uploadRunning || !hasWaiting;
+    }
+
+    function renderQueue() {
+      queueListEl.innerHTML = queueItems.map(it => {
+        const rowClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error'
+          : (it.status === 'uploading' || it.status === 'queued' || it.status === 'processing') ? 'active' : '';
+        const spinner = (it.status === 'uploading' || it.status === 'queued' || it.status === 'processing')
+          ? '<span class="mini-spinner"></span>' : '';
+        const statusClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error' : '';
+        const canRemove = it.status === 'waiting';
+        return `
+          <div class="queue-row ${rowClass}" data-id="${it.id}">
+            <span class="qf-icon">${isVideo(it.filename) ? '🎬' : '🎵'}</span>
+            <span class="qf-name" title="${escHtml(it.filename)}">${escHtml(it.filename)}</span>
+            <span class="qf-size">${fmtSize(it.file.size)}</span>
+            <span class="qf-status ${statusClass}">${spinner}${escHtml(it.statusText)}</span>
+            <div class="qf-actions">
+              <button class="qf-btn" data-action="view" ${it.status === 'done' ? '' : 'disabled'}>Visa</button>
+              <button class="qf-btn" data-action="txt" ${it.status === 'done' ? '' : 'disabled'}>.txt</button>
+              <button class="qf-btn" data-action="srt" ${it.status === 'done' ? '' : 'disabled'}>.srt</button>
+              <button class="qf-btn qf-remove" data-action="remove" ${canRemove ? '' : 'disabled'}>✕</button>
+            </div>
+          </div>`;
+      }).join('');
+      updateZipButtons();
+    }
+
+    function updateZipButtons() {
+      const anyDone = queueItems.some(it => it.status === 'done');
+      zipTxtBtn.disabled = !anyDone;
+      zipSrtBtn.disabled = !anyDone;
+    }
+
+    queueListEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const row = btn.closest('.queue-row');
+      const id = row?.dataset.id;
+      const item = queueItems.find(it => it.id === id);
+      if (!item) return;
+      const action = btn.dataset.action;
+
+      if (action === 'remove') {
+        queueItems = queueItems.filter(it => it.id !== id);
+        renderQueue();
+        updateStartButton();
+      } else if (action === 'view') {
+        showItemResult(item);
+      } else if (action === 'txt') {
+        downloadTxt(item);
+      } else if (action === 'srt') {
+        downloadSrt(item);
+      }
+    });
+
+    function downloadTxt(item) {
+      if (!item.data) return;
+      const blob = new Blob([item.data.text || ''], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = item.filename.replace(/\.[^.]+$/, '') + '.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function downloadSrt(item) {
+      if (!item.jobId) return;
+      const base = item.filename.replace(/\.[^.]+$/, '') || 'transkribering';
+      const lang = (item.data && item.data.language) || 'sv';
+      const filename = `${base}_sub_${lang}.srt`;
+      const a = document.createElement('a');
+      a.href = '/srt/' + item.jobId + '?filename=' + encodeURIComponent(filename);
+      a.download = filename;
+      a.click();
+    }
+
+    function showItemResult(item) {
+      if (!item.data) return;
+      previewId = item.id;
+      currentJobId = item.jobId;
+      currentFilename = item.filename;
+      currentLanguage = item.data.language || '';
+      showResult(item.data);
+    }
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) addFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    });
+
+    transcribeBtn.addEventListener('click', async () => {
+      const waiting = queueItems.filter(it => it.status === 'waiting');
+      if (!waiting.length || uploadRunning) return;
+
+      uploadRunning = true;
+      transcribeBtn.disabled = true;
+      const model = document.querySelector('input[name="model"]:checked')?.value || 'medium';
+      const language = langSelect.value;
+
+      setStatus('loading', `<span class="spinner"></span>Laddar upp ${waiting.length} fil(er)…`);
+
+      for (const item of waiting) {
+        try {
+          await uploadAndEnqueue(item, model, language);
+        } catch (err) {
+          item.status = 'error';
+          item.statusText = err.message || 'Uppladdningsfel';
+          renderQueue();
+        }
+      }
+
+      setStatus('', '');
+      uploadRunning = false;
+      updateStartButton();
+      startPolling();
+    });
+
+    async function uploadAndEnqueue(item, model, language) {
+      const file = item.file;
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+      const uploadId = crypto.randomUUID();
+      item.status = 'uploading';
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const chunk = file.slice(start, start + CHUNK_SIZE);
+        const form = new FormData();
+        form.append('upload_id', uploadId);
+        form.append('chunk_index', i);
+        form.append('total_chunks', totalChunks);
+        form.append('ext', item.ext);
+        form.append('chunk', chunk);
+
+        const res = await fetch('/upload-chunk', { method: 'POST', body: form });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || `Serverfel vid del ${i + 1}`);
+        }
+
+        const sent = Math.min((i + 1) * CHUNK_SIZE, file.size);
+        const pct = Math.round((sent / file.size) * 100);
+        item.statusText = `Laddar upp ${pct}%`;
+        renderQueue();
+      }
+
+      const res = await fetch('/transcribe-assembled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId, language, model }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Serverfel');
+
+      item.jobId = data.job_id;
+      item.status = 'queued';
+      item.statusText = 'Väntar i kö…';
+      renderQueue();
+    }
+
+    function startPolling() {
+      if (pollHandle) return;
+      pollHandle = setInterval(async () => {
+        const pending = queueItems.filter(it => it.status === 'queued' || it.status === 'processing');
+        if (!pending.length) {
+          clearInterval(pollHandle);
+          pollHandle = null;
+          return;
+        }
+
+        await Promise.all(pending.map(async (item) => {
+          try {
+            const r = await fetch('/status/' + item.jobId);
+            const d = await r.json();
+            if (d.status === 'done') {
+              item.status = 'done';
+              item.statusText = '✓ Klar';
+              item.data = d;
+              if (previewId === null) showItemResult(item);
+            } else if (d.status === 'error') {
+              item.status = 'error';
+              item.statusText = d.error || 'Fel';
+            } else {
+              item.status = d.status || item.status;
+              item.statusText = d.status_text || item.statusText;
+            }
+          } catch (_) { /* keep previous state, try again next tick */ }
+        }));
+
+        renderQueue();
+      }, 1500);
+    }
+
+    function showResult(data) {
+      resultText.value = data.text || '';
+      copyBtn.disabled = false;
+      downloadBtn.disabled = false;
+      srtBtn.disabled = false;
+
+      const langName = { sv: 'svenska', en: 'engelska', no: 'norska', da: 'danska',
+        fi: 'finska', de: 'tyska', fr: 'franska', es: 'spanska' };
+      const lang = langName[data.language] || data.language || '?';
+      const dur = data.duration ? fmtDuration(data.duration) : '';
+      const modelLabels = { base: 'Snabb', medium: 'Medel', 'large-v3-turbo': 'Bäst' };
+      const usedModel = modelLabels[data.model] || data.model || '';
+      resultMeta.innerHTML =
+        `<span>Fil: <span>${escHtml(currentFilename)}</span></span>` +
+        `<span>Detekterat språk: <span>${lang}</span></span>` +
+        (dur ? `<span>Längd: <span>${dur}</span></span>` : '') +
+        (usedModel ? `<span>Modell: <span>${usedModel}</span></span>` : '');
+
+      segmentsBox.classList.remove('open');
+      segmentsToggle.textContent = 'Visa tidsstämplar';
+      if (data.segments?.length) {
+        segmentsToggle.style.display = 'inline';
+        segmentsBox.innerHTML = data.segments.map(s =>
+          `<div class="seg-row"><span class="seg-time">${s.start} → ${s.end}</span><span class="seg-text">${escHtml(s.text)}</span></div>`
+        ).join('');
+      } else {
+        segmentsToggle.style.display = 'none';
+        segmentsBox.innerHTML = '';
+      }
+    }
+
+    segmentsToggle.addEventListener('click', () => {
+      const open = segmentsBox.classList.toggle('open');
+      segmentsToggle.textContent = open ? 'Dölj tidsstämplar' : 'Visa tidsstämplar';
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      if (!resultText.value) return;
+      await navigator.clipboard.writeText(resultText.value);
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = 'Kopierat!';
+      setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!resultText.value) return;
+      const blob = new Blob([resultText.value], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (currentFilename.replace(/\.[^.]+$/, '') || 'transkription') + '.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    srtBtn.addEventListener('click', () => {
+      if (!currentJobId) return;
+      const base = currentFilename.replace(/\.[^.]+$/, '') || 'transkribering';
+      const lang = currentLanguage || 'sv';
+      const filename = `${base}_sub_${lang}.srt`;
+      const a = document.createElement('a');
+      a.href = '/srt/' + currentJobId + '?filename=' + encodeURIComponent(filename);
+      a.download = filename;
+      a.click();
+    });
+
+    async function downloadZip(format) {
+      const items = queueItems
+        .filter(it => it.status === 'done')
+        .map(it => ({ job_id: it.jobId, filename: it.filename }));
+      if (!items.length) return;
+
+      const btn = format === 'txt' ? zipTxtBtn : zipSrtBtn;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Skapar zip…';
+
+      try {
+        const res = await fetch('/download-zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items, format }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || 'Serverfel');
+        }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'transkriberingar.zip';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        setStatus('error', '✗ ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+        updateZipButtons();
+      }
+    }
+
+    zipTxtBtn.addEventListener('click', () => downloadZip('txt'));
+    zipSrtBtn.addEventListener('click', () => downloadZip('srt'));
+  </script>
+</body>
+</html>

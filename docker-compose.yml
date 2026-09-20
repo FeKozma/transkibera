@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    volumes:
+      - whisper_models:/models
+    environment:
+      - WHISPER_MODEL=medium
+      - WHISPER_COMPUTE=int8
+      - WHISPER_CPU_THREADS=1
+      - WHISPER_IDLE_UNLOAD_SECONDS=600
+      - OMP_NUM_THREADS=1
+    cpus: "1.0"
+    mem_limit: "2g"
+    mem_reservation: "256m"
+
+volumes:
+  whisper_models:
