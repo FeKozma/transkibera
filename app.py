@@ -1,8 +1,10 @@
 import gc
 import io
+import json
 import os
 import queue
 import re
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -49,6 +51,55 @@ jobs: dict[str, dict] = {}
 
 # jobs are processed one at a time by a single background worker
 job_queue: "queue.Queue[tuple]" = queue.Queue()
+
+# Finished jobs are mirrored to disk so results survive a server restart —
+# the in-memory `jobs` dict alone doesn't. In-flight (queued/processing) jobs
+# are deliberately not persisted: a restart can't resume a transcription
+# that was mid-run, so those are just lost, same as before.
+DB_PATH = os.environ.get("JOBS_DB_PATH", "/data/jobs.db")
+JOB_RETENTION_DAYS = int(os.environ.get("JOB_RETENTION_DAYS", "30"))
+
+
+def _db() -> sqlite3.Connection:
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS jobs ("
+        "job_id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)"
+    )
+    return conn
+
+
+def _persist_job(job_id: str, job: dict) -> None:
+    cutoff = time.time() - JOB_RETENTION_DAYS * 86400
+    conn = _db()
+    try:
+        with conn:
+            conn.execute("DELETE FROM jobs WHERE created_at < ?", (cutoff,))
+            conn.execute(
+                "INSERT OR REPLACE INTO jobs (job_id, status, payload, created_at) VALUES (?, ?, ?, ?)",
+                (job_id, job["status"], json.dumps(job), time.time()),
+            )
+    finally:
+        conn.close()
+
+
+def _load_job(job_id: str) -> dict | None:
+    conn = _db()
+    try:
+        row = conn.execute("SELECT payload FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row[0]) if row else None
+
+
+def get_job(job_id: str) -> dict | None:
+    job = jobs.get(job_id)
+    if job is None:
+        job = _load_job(job_id)
+        if job is not None:
+            jobs[job_id] = job  # warm the in-memory cache for subsequent lookups
+    return job
 
 
 def get_model(model_name: str) -> WhisperModel:
@@ -190,8 +241,10 @@ def run_transcription(job_id: str, file_path: str, language: str | None, model_n
             "model": model_name,
             "speaker_colors": speaker_colors,
         }
+        _persist_job(job_id, jobs[job_id])
     except Exception as e:
         jobs[job_id] = {"status": "error", "error": str(e)}
+        _persist_job(job_id, jobs[job_id])
     finally:
         for p in [file_path, audio_path]:
             if p:
@@ -322,7 +375,7 @@ def transcribe_assembled():
 
 @app.route("/srt/<job_id>")
 def download_srt(job_id: str):
-    job = jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "done":
         return jsonify({"error": "Ej klar"}), 404
 
@@ -352,7 +405,7 @@ def download_zip():
     used_names: set[str] = set()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for item in items:
-            job = jobs.get(item.get("job_id"))
+            job = get_job(item.get("job_id"))
             if not job or job.get("status") != "done":
                 continue
 
@@ -378,7 +431,7 @@ def download_zip():
 
 @app.route("/status/<job_id>")
 def status(job_id: str):
-    job = jobs.get(job_id)
+    job = get_job(job_id)
     if not job:
         return jsonify({"error": "Okänt jobb"}), 404
     return jsonify(job)

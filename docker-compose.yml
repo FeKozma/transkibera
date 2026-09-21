@@ -7,6 +7,7 @@ services:
     volumes:
       - whisper_models:/models
       - hf_cache:/root/.cache/huggingface
+      - app_data:/data
     environment:
       - WHISPER_MODEL=medium
       - WHISPER_COMPUTE=int8
@@ -24,3 +25,4 @@ services:
 volumes:
   whisper_models:
   hf_cache:
+  app_data:
