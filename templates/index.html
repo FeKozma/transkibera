@@ -566,8 +566,9 @@
 
     const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.flv', '.ts', '.mts', '.m2ts']);
     const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
+    const STORAGE_KEY = 'transkribera_queue_v1';
 
-    let queueItems = []; // { id, file, filename, ext, status, statusText, jobId, data, error }
+    let queueItems = []; // { id, file, filename, ext, fileSize, status, statusText, jobId, data, error }
     let currentJobId    = null;
     let currentFilename = '';
     let currentLanguage = '';
@@ -610,6 +611,7 @@
           file,
           filename: file.name,
           ext,
+          fileSize: file.size,
           status: 'waiting',
           statusText: 'Väntar…',
           jobId: null,
@@ -633,12 +635,12 @@
         const spinner = (it.status === 'uploading' || it.status === 'queued' || it.status === 'processing')
           ? '<span class="mini-spinner"></span>' : '';
         const statusClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error' : '';
-        const canRemove = it.status === 'waiting';
+        const canRemove = it.status === 'waiting' || it.status === 'done' || it.status === 'error';
         return `
           <div class="queue-row ${rowClass}" data-id="${it.id}">
             <span class="qf-icon">${isVideo(it.filename) ? '🎬' : '🎵'}</span>
             <span class="qf-name" title="${escHtml(it.filename)}">${escHtml(it.filename)}</span>
-            <span class="qf-size">${fmtSize(it.file.size)}</span>
+            <span class="qf-size">${fmtSize(it.fileSize)}</span>
             <span class="qf-status ${statusClass}">${spinner}${escHtml(it.statusText)}</span>
             <div class="qf-actions">
               <button class="qf-btn" data-action="view" ${it.status === 'done' ? '' : 'disabled'}>Visa</button>
@@ -649,6 +651,37 @@
           </div>`;
       }).join('');
       updateZipButtons();
+      saveQueue();
+    }
+
+    function saveQueue() {
+      try {
+        const toSave = queueItems
+          .filter(it => it.jobId) // only items that actually reached the server can survive a refresh
+          .map(({ file, ...rest }) => rest);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+      } catch (_) { /* storage unavailable or full — persistence is best-effort */ }
+    }
+
+    function loadQueue() {
+      let saved;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        saved = JSON.parse(raw).filter(it => it && it.jobId);
+      } catch (_) { return; }
+      if (!saved.length) return;
+
+      queueItems = saved;
+      renderQueue();
+      updateStartButton();
+
+      const lastDone = [...queueItems].reverse().find(it => it.status === 'done');
+      if (lastDone) showItemResult(lastDone);
+
+      if (queueItems.some(it => it.status === 'queued' || it.status === 'processing')) {
+        startPolling();
+      }
     }
 
     function updateZipButtons() {
@@ -806,7 +839,10 @@
           try {
             const r = await fetch('/status/' + item.jobId);
             const d = await r.json();
-            if (d.status === 'done') {
+            if (r.status === 404) {
+              item.status = 'error';
+              item.statusText = 'Resultat borta (servern omstartad)';
+            } else if (d.status === 'done') {
               item.status = 'done';
               item.statusText = '✓ Klar';
               item.data = d;
@@ -935,6 +971,8 @@
 
     zipTxtBtn.addEventListener('click', () => downloadZip('txt'));
     zipSrtBtn.addEventListener('click', () => downloadZip('srt'));
+
+    loadQueue();
   </script>
 </body>
 </html>
