@@ -39,6 +39,16 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 DIARIZATION_KEY = "__diarization__"
 SPEAKER_COLORS = ["#7c6fff", "#4ade80", "#facc15", "#f87171", "#38bdf8", "#f472b6", "#fb923c", "#a3e635"]
 
+# "Cleanup" step: turns a finished transcript into a formal meeting protocol via
+# the Anthropic API. Off unless ANTHROPIC_API_KEY is set.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+ANTHROPIC_HINT_MODEL = os.environ.get("ANTHROPIC_HINT_MODEL", "claude-haiku-4-5-20251001")
+# Safety cap on transcript size sent per API call.
+MAX_TRANSCRIPT_CHARS = 120_000
+
+_anthropic_client = None
+
 _models: dict[str, object] = {}
 _last_used: dict[str, float] = {}
 _models_lock = threading.Lock()
@@ -136,6 +146,33 @@ def _assign_speakers(lines: list[dict], turns: list[tuple[float, float, str]]) -
         f"Talare {i + 1}": SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
         for i in range(len(speaker_order))
     }
+
+
+def get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic  # imported lazily so the app still starts if unused
+
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
+
+def _cap_text(text: str, limit: int = MAX_TRANSCRIPT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n…[avkortat]"
+
+
+def _named_transcript(job: dict, speaker_names: dict) -> str:
+    lines = []
+    for seg in job.get("segments", []):
+        speaker = seg.get("speaker")
+        if speaker:
+            name = (speaker_names.get(speaker) or "").strip() or speaker
+            lines.append(f"{name}: {seg['text']}")
+        else:
+            lines.append(seg["text"])
+    return "\n".join(lines)
 
 
 def extract_audio(video_path: str) -> str:
@@ -374,6 +411,145 @@ def download_zip():
     resp.headers["Content-Type"] = "application/zip"
     resp.headers["Content-Disposition"] = 'attachment; filename="transkriberingar.zip"'
     return resp
+
+
+@app.route("/speaker-hints/<job_id>", methods=["POST"])
+def speaker_hints(job_id: str):
+    job = jobs.get(job_id)
+    if not job or job.get("status") != "done":
+        return jsonify({"error": "Jobbet är inte klart"}), 404
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "AI-städning är inte konfigurerad på servern (ANTHROPIC_API_KEY saknas)"}), 400
+    if not job.get("speaker_colors"):
+        return jsonify({"error": "Talaridentifiering användes inte för den här filen"}), 400
+
+    if job.get("speaker_hints"):
+        return jsonify({"speakers": job["speaker_hints"]})
+
+    transcript = _cap_text(job["text"])
+    prompt = (
+        "Nedan är ett mötestranskript där talarna bara är märkta generiskt "
+        "(Talare 1, Talare 2, osv) eftersom de inte kunde kännas igen automatiskt. "
+        "Hjälp en mötessekreterare att lista ut vem som är vem: för varje unik "
+        "talaretikett i transkriptet, sammanfatta i en kort mening vad den personen "
+        "huvudsakligen pratade om eller bidrog med, och plocka ut 1-2 korta ordagranna "
+        "citat som hjälper någon att känna igen personen. Svara på svenska.\n\n"
+        f"Transkript:\n{transcript}"
+    )
+
+    try:
+        client = get_anthropic_client()
+        response = client.messages.create(
+            model=ANTHROPIC_HINT_MODEL,
+            max_tokens=2000,
+            tools=[{
+                "name": "report_speaker_hints",
+                "description": "Report identifying info for each speaker label found in the transcript.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "speakers": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Exact speaker label as it appears in the transcript, e.g. 'Talare 1'",
+                                    },
+                                    "topic_summary": {
+                                        "type": "string",
+                                        "description": "One short Swedish sentence describing what this person mainly talked about or contributed.",
+                                    },
+                                    "quotes": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "1-2 short verbatim Swedish quotes from this speaker.",
+                                    },
+                                },
+                                "required": ["label", "topic_summary", "quotes"],
+                            },
+                        },
+                    },
+                    "required": ["speakers"],
+                },
+            }],
+            tool_choice={"type": "tool", "name": "report_speaker_hints"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        tool_use = next(b for b in response.content if b.type == "tool_use")
+        speakers = tool_use.input.get("speakers", [])
+    except Exception as e:
+        return jsonify({"error": f"AI-anropet misslyckades: {e}"}), 502
+
+    job["speaker_hints"] = speakers
+    return jsonify({"speakers": speakers})
+
+
+@app.route("/summarize/<job_id>", methods=["POST"])
+def summarize(job_id: str):
+    job = jobs.get(job_id)
+    if not job or job.get("status") != "done":
+        return jsonify({"error": "Jobbet är inte klart"}), 404
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "AI-städning är inte konfigurerad på servern (ANTHROPIC_API_KEY saknas)"}), 400
+
+    data = request.json or {}
+    speaker_names = data.get("speaker_names") or {}
+    meeting_date = (data.get("meeting_date") or "").strip()
+    meeting_type = (data.get("meeting_type") or "").strip() or "Styrelsemöte"
+    chairperson = (data.get("chairperson") or "").strip()
+    secretary = (data.get("secretary") or "").strip()
+    extra_context = (data.get("extra_context") or "").strip()
+
+    transcript = _cap_text(_named_transcript(job, speaker_names))
+
+    details = [f"Mötestyp: {meeting_type}"]
+    if meeting_date:
+        details.append(f"Mötesdatum: {meeting_date}")
+    if chairperson:
+        details.append(f"Mötesordförande: {chairperson}")
+    if secretary:
+        details.append(f"Sekreterare: {secretary}")
+    if extra_context:
+        details.append(f"Övrig information från sekreteraren: {extra_context}")
+
+    prompt = (
+        "Du är sekreterare för en ideell förening (t.ex. en löparförening) i Sverige "
+        "och ska skriva ett formellt mötesprotokoll utifrån mötestranskriptet nedan.\n\n"
+        + "\n".join(details) + "\n\n"
+        "Skriv protokollet med följande struktur och i den ordningen:\n"
+        "1. Rubrik med \"Mötesprotokoll\", mötestyp och datum.\n"
+        "2. Närvarande: lista de personer som förekommer i transkriptet (namngivna, "
+        "eller \"Talare N\" om de inte namngetts) samt eventuella extra deltagare från "
+        "övrig information.\n"
+        "3. §1 Mötets öppnande.\n"
+        "4. Numrerade paragrafer (§2, §3, …) för varje sakfråga som togs upp, med en "
+        "kort saklig sammanfattning av diskussionen. Skriv en tydlig rad som börjar med "
+        "\"Beslut:\" under en paragraf om ett beslut fattades där.\n"
+        "5. Ett avsnitt \"Åtgärdspunkter\" som listar vem som ska göra vad, och eventuell "
+        "deadline om den nämndes.\n"
+        "6. Sista paragrafen: Mötets avslutande.\n\n"
+        "Regler: Skriv på svenska. Använd bara information som faktiskt förekommer i "
+        "transkriptet eller uppgifterna ovan — hitta inte på beslut, namn eller datum. "
+        "Var koncis men fullständig; det här protokollet ska kunna användas som det "
+        "riktiga, officiella protokollet för mötet.\n\n"
+        f"Transkript:\n{transcript}"
+    )
+
+    try:
+        client = get_anthropic_client()
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        summary = "".join(b.text for b in response.content if b.type == "text").strip()
+    except Exception as e:
+        return jsonify({"error": f"AI-anropet misslyckades: {e}"}), 502
+
+    job["summary"] = summary
+    return jsonify({"summary": summary})
 
 
 @app.route("/status/<job_id>")
