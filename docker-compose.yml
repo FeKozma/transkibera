@@ -17,6 +17,9 @@ services:
       # with access accepted on huggingface.co/pyannote/speaker-diarization-3.1
       # and .../segmentation-3.0. Left unset here, diarization is disabled.
       - HF_TOKEN=${HF_TOKEN:-}
+      # "Skapa protokoll" meeting-protocol generation, via the Anthropic API.
+      # Left unset here, the button is disabled.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     cpus: "1.0"
     mem_limit: "3g"
     mem_reservation: "256m"

@@ -13,6 +13,13 @@ get a transcript back in the browser, and export it as SRT.
   [pyannote.audio](https://github.com/pyannote/pyannote-audio) — labels
   each segment with the speaker it overlaps most, color-coded consistently
   in both the web preview and the exported SRT
+- Optional "Skapa protokoll" button that turns a finished transcript
+  into a formal Swedish meeting protocol (mötesprotokoll) via the
+  [Anthropic API](https://www.anthropic.com/api). When diarization was
+  used, it first asks Claude to summarize what each anonymous speaker
+  talked about and pulls a couple of representative quotes, so you can
+  tell it "oh, that's Maria" instead of guessing from a bare speaker
+  number — then writes up the protocol with those names attached
 - Idle model eviction to keep memory usage low when the app isn't in use
 - Runs in Docker, capped to a configurable CPU/RAM budget
 
@@ -41,6 +48,20 @@ Diarization is optional and off by default. To enable it:
 `pyannote`/`torch` are imported lazily, so idle memory use is unaffected
 until diarization is actually used.
 
+### Meeting protocol generation
+
+The "Skapa protokoll" button is optional and off by default. To enable it, set
+an [Anthropic API key](https://console.anthropic.com/) as `ANTHROPIC_API_KEY`
+in your environment before starting the container:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-xxx docker compose up -d
+```
+
+Note that the transcript text (and, briefly, meeting details you type in
+— chairperson, secretary, agenda notes) is sent to Anthropic's API to
+generate the protocol.
+
 ## Configuration
 
 Environment variables (set in `docker-compose.yml`):
@@ -52,6 +73,9 @@ Environment variables (set in `docker-compose.yml`):
 | `WHISPER_CPU_THREADS` | `1` | CPU threads per transcription job |
 | `WHISPER_IDLE_UNLOAD_SECONDS` | `600` | Seconds of inactivity before unloading a model |
 | `HF_TOKEN` | unset | Hugging Face token, required for diarization |
+| `ANTHROPIC_API_KEY` | unset | Anthropic API key, required for the "Skapa protokoll" button |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model used to write the meeting protocol |
+| `ANTHROPIC_HINT_MODEL` | `claude-haiku-4-5-20251001` | Cheaper model used to generate per-speaker hints |
 
 ## License
 

@@ -439,6 +439,135 @@
       .layout { flex-direction: column; }
       .upload-col { flex: none; width: 100%; }
     }
+
+    textarea#cleanupResultText {
+      width: 100%;
+      height: 260px;
+      background: #0f0f13;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      color: #e8e8f0;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      padding: 1rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    textarea#cleanupResultText:focus { outline: none; border-color: #7c6fff; }
+
+    input[type="text"], input[type="date"] {
+      width: 100%;
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 8px;
+      color: #e8e8f0;
+      padding: 0.55rem 0.75rem;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+
+    input[type="text"]:focus, input[type="date"]:focus { outline: none; border-color: #7c6fff; }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1.5rem;
+    }
+
+    .modal-card {
+      background: #18181f;
+      border: 1px solid #2a2a38;
+      border-radius: 16px;
+      padding: 1.75rem;
+      width: 100%;
+      max-width: 560px;
+      max-height: 85vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-header h2 { font-size: 1.1rem; font-weight: 700; }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 1.1rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .modal-close:hover { color: #e8e8f0; }
+
+    .modal-body { display: flex; flex-direction: column; gap: 0.75rem; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 0.6rem; }
+    .modal-error { color: #f87171; font-size: 0.85rem; }
+    .modal-hint { font-size: 0.82rem; color: #888; }
+
+    .speaker-card {
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .speaker-label { font-weight: 700; font-size: 0.85rem; }
+    .speaker-topic { font-size: 0.82rem; color: #aaa; }
+    .speaker-quote {
+      font-size: 0.78rem;
+      color: #666;
+      font-style: italic;
+      border-left: 2px solid #2a2a38;
+      padding-left: 0.5rem;
+    }
+
+    .field-row { display: flex; flex-direction: column; gap: 0.35rem; }
+
+    .field-textarea {
+      width: 100%;
+      min-height: 70px;
+      background: #0f0f13;
+      border: 1px solid #2a2a38;
+      border-radius: 8px;
+      color: #e8e8f0;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.85rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    .field-textarea:focus { outline: none; border-color: #7c6fff; }
+
+    button.secondary-btn {
+      background: #1e1e2e;
+      border: 1px solid #2a2a38;
+      color: #aaa;
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    button.secondary-btn:hover { border-color: #7c6fff; color: #e8e8f0; }
+
+    button.action-btn.inline { width: auto; padding: 0.6rem 1.2rem; }
   </style>
 </head>
 <body>
@@ -528,6 +657,7 @@
           <button class="icon-btn" id="copyBtn" disabled>Kopiera</button>
           <button class="icon-btn" id="downloadBtn" disabled>Ladda ner .txt</button>
           <button class="icon-btn" id="srtBtn" disabled>Ladda ner .srt</button>
+          <button class="icon-btn" id="cleanupBtn" disabled>📝 Skapa protokoll</button>
         </div>
       </div>
 
@@ -541,6 +671,28 @@
       <textarea id="resultText" placeholder="Texten visas här när transkriptionen är klar…" readonly></textarea>
       <button class="segments-toggle" id="segmentsToggle" style="display:none">Visa tidsstämplar</button>
       <div class="segments-box" id="segmentsBox"></div>
+
+      <div id="cleanupSection" style="display:none">
+        <div class="result-header">
+          <span class="result-title">Mötesprotokoll</span>
+          <div class="result-actions">
+            <button class="icon-btn" id="cleanupCopyBtn">Kopiera</button>
+            <button class="icon-btn" id="cleanupDownloadBtn">Ladda ner .txt</button>
+          </div>
+        </div>
+        <textarea id="cleanupResultText" readonly></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="cleanupModal" style="display:none">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="cleanupModalTitle">Skapa protokoll</h2>
+        <button class="modal-close" id="cleanupModalClose">✕</button>
+      </div>
+      <div class="modal-body" id="cleanupModalBody"></div>
+      <div class="modal-footer" id="cleanupModalFooter"></div>
     </div>
   </div>
 
@@ -563,6 +715,16 @@
     const segmentsToggle = document.getElementById('segmentsToggle');
     const segmentsBox    = document.getElementById('segmentsBox');
     const diarizeCheck   = document.getElementById('diarizeCheck');
+    const cleanupBtn         = document.getElementById('cleanupBtn');
+    const cleanupSection     = document.getElementById('cleanupSection');
+    const cleanupResultText  = document.getElementById('cleanupResultText');
+    const cleanupCopyBtn     = document.getElementById('cleanupCopyBtn');
+    const cleanupDownloadBtn = document.getElementById('cleanupDownloadBtn');
+    const cleanupModal       = document.getElementById('cleanupModal');
+    const cleanupModalTitle  = document.getElementById('cleanupModalTitle');
+    const cleanupModalBody   = document.getElementById('cleanupModalBody');
+    const cleanupModalFooter = document.getElementById('cleanupModalFooter');
+    const cleanupModalClose  = document.getElementById('cleanupModalClose');
 
     const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.flv', '.ts', '.mts', '.m2ts']);
     const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
@@ -615,6 +777,10 @@
           jobId: null,
           data: null,
           error: null,
+          speakerNames: {},
+          speakerHints: null,
+          meetingMeta: null,
+          summary: null,
         });
       }
       renderQueue();
@@ -707,6 +873,22 @@
       currentFilename = item.filename;
       currentLanguage = item.data.language || '';
       showResult(item.data);
+      updateCleanupUI(item);
+    }
+
+    function getCurrentItem() {
+      return queueItems.find(it => it.id === previewId);
+    }
+
+    function updateCleanupUI(item) {
+      cleanupBtn.disabled = !item || item.status !== 'done';
+      if (item && item.summary) {
+        cleanupSection.style.display = '';
+        cleanupResultText.value = item.summary;
+      } else {
+        cleanupSection.style.display = 'none';
+        cleanupResultText.value = '';
+      }
     }
 
     fileInput.addEventListener('change', () => {
@@ -935,6 +1117,185 @@
 
     zipTxtBtn.addEventListener('click', () => downloadZip('txt'));
     zipSrtBtn.addEventListener('click', () => downloadZip('srt'));
+
+    cleanupBtn.addEventListener('click', () => {
+      const item = getCurrentItem();
+      if (!item || item.status !== 'done') return;
+      openCleanupWizard(item);
+    });
+
+    function closeCleanupModal() {
+      cleanupModal.style.display = 'none';
+      cleanupModalBody.innerHTML = '';
+      cleanupModalFooter.innerHTML = '';
+    }
+
+    cleanupModalClose.addEventListener('click', closeCleanupModal);
+    cleanupModal.addEventListener('click', (e) => {
+      if (e.target === cleanupModal) closeCleanupModal();
+    });
+
+    async function openCleanupWizard(item) {
+      const speakers = Object.keys((item.data && item.data.speaker_colors) || {});
+      cleanupModal.style.display = 'flex';
+      if (speakers.length) {
+        await showSpeakerStep(item, speakers);
+      } else {
+        showMetaStep(item);
+      }
+    }
+
+    async function showSpeakerStep(item, speakers) {
+      cleanupModalTitle.textContent = 'Vem är vem?';
+      cleanupModalBody.innerHTML = '<p class="modal-hint"><span class="spinner"></span>Hämtar ledtrådar om talarna…</p>';
+      cleanupModalFooter.innerHTML = '';
+
+      let hints = item.speakerHints;
+      if (!hints) {
+        try {
+          const res = await fetch('/speaker-hints/' + item.jobId, { method: 'POST' });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.error || 'Serverfel');
+          hints = d.speakers;
+          item.speakerHints = hints;
+        } catch (err) {
+          cleanupModalBody.innerHTML = `<p class="modal-error">✗ ${escHtml(err.message)}</p>`;
+          cleanupModalFooter.innerHTML = '<button class="secondary-btn" id="cleanupCancelBtn">Stäng</button>';
+          document.getElementById('cleanupCancelBtn').addEventListener('click', closeCleanupModal);
+          return;
+        }
+      }
+
+      const hintByLabel = {};
+      (hints || []).forEach(h => { hintByLabel[h.label] = h; });
+
+      cleanupModalBody.innerHTML =
+        '<p class="modal-hint">Fyll i vem som är vem (lämna tomt för att behålla &quot;Talare N&quot;):</p>' +
+        speakers.map(label => {
+          const hint = hintByLabel[label];
+          const quotes = (hint?.quotes || []).map(q => `<div class="speaker-quote">"${escHtml(q)}"</div>`).join('');
+          const known = item.speakerNames[label] || '';
+          return `
+            <div class="speaker-card">
+              <div class="speaker-label">${escHtml(label)}</div>
+              ${hint?.topic_summary ? `<div class="speaker-topic">${escHtml(hint.topic_summary)}</div>` : ''}
+              ${quotes}
+              <input type="text" data-speaker="${escHtml(label)}" placeholder="Namn (t.ex. Maria Andersson)" value="${escHtml(known)}" />
+            </div>`;
+        }).join('');
+
+      cleanupModalFooter.innerHTML =
+        '<button class="secondary-btn" id="cleanupCancelBtn">Avbryt</button>' +
+        '<button class="action-btn inline" id="cleanupNextBtn">Nästa</button>';
+
+      document.getElementById('cleanupCancelBtn').addEventListener('click', closeCleanupModal);
+      document.getElementById('cleanupNextBtn').addEventListener('click', () => {
+        cleanupModalBody.querySelectorAll('input[data-speaker]').forEach(input => {
+          item.speakerNames[input.dataset.speaker] = input.value.trim();
+        });
+        showMetaStep(item);
+      });
+    }
+
+    function showMetaStep(item) {
+      cleanupModalTitle.textContent = 'Mötesuppgifter';
+      const today = new Date().toISOString().slice(0, 10);
+      const meta = item.meetingMeta || {};
+      const speakers = Object.keys((item.data && item.data.speaker_colors) || {});
+
+      cleanupModalBody.innerHTML = `
+        <div class="field-row">
+          <label class="field-label">Mötestyp</label>
+          <input type="text" id="cuMeetingType" value="${escHtml(meta.type || 'Styrelsemöte')}" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Datum</label>
+          <input type="date" id="cuMeetingDate" value="${meta.date || today}" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Mötesordförande</label>
+          <input type="text" id="cuChair" value="${escHtml(meta.chair || '')}" placeholder="Valfritt" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Sekreterare</label>
+          <input type="text" id="cuSecretary" value="${escHtml(meta.secretary || '')}" placeholder="Valfritt" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Övrig information</label>
+          <textarea class="field-textarea" id="cuExtra" placeholder="T.ex. dagordning, deltagare som inte pratade, plats…">${escHtml(meta.extra || '')}</textarea>
+        </div>
+      `;
+      cleanupModalFooter.innerHTML =
+        (speakers.length ? '<button class="secondary-btn" id="cleanupBackBtn">Tillbaka</button>' : '<button class="secondary-btn" id="cleanupCancelBtn2">Avbryt</button>') +
+        '<button class="action-btn inline" id="cleanupGenerateBtn">Skapa protokoll</button>';
+
+      if (speakers.length) {
+        document.getElementById('cleanupBackBtn').addEventListener('click', () => showSpeakerStep(item, speakers));
+      } else {
+        document.getElementById('cleanupCancelBtn2').addEventListener('click', closeCleanupModal);
+      }
+      document.getElementById('cleanupGenerateBtn').addEventListener('click', () => generateSummary(item));
+    }
+
+    async function generateSummary(item) {
+      const meetingType = document.getElementById('cuMeetingType').value.trim();
+      const meetingDate = document.getElementById('cuMeetingDate').value;
+      const chair = document.getElementById('cuChair').value.trim();
+      const secretary = document.getElementById('cuSecretary').value.trim();
+      const extra = document.getElementById('cuExtra').value.trim();
+
+      item.meetingMeta = { type: meetingType, date: meetingDate, chair, secretary, extra };
+
+      cleanupModalTitle.textContent = 'Skapar protokoll…';
+      cleanupModalBody.innerHTML = '<p class="modal-hint"><span class="spinner"></span>Skriver protokoll, det kan ta en stund…</p>';
+      cleanupModalFooter.innerHTML = '';
+
+      try {
+        const res = await fetch('/summarize/' + item.jobId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            speaker_names: item.speakerNames,
+            meeting_type: meetingType,
+            meeting_date: meetingDate,
+            chairperson: chair,
+            secretary: secretary,
+            extra_context: extra,
+          }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Serverfel');
+        item.summary = d.summary;
+        closeCleanupModal();
+        const current = getCurrentItem();
+        if (current === item) updateCleanupUI(item);
+      } catch (err) {
+        cleanupModalBody.innerHTML = `<p class="modal-error">✗ ${escHtml(err.message)}</p>`;
+        cleanupModalFooter.innerHTML =
+          '<button class="secondary-btn" id="cleanupCloseErrBtn">Stäng</button>' +
+          '<button class="action-btn inline" id="cleanupRetryBtn">Försök igen</button>';
+        document.getElementById('cleanupCloseErrBtn').addEventListener('click', closeCleanupModal);
+        document.getElementById('cleanupRetryBtn').addEventListener('click', () => showMetaStep(item));
+      }
+    }
+
+    cleanupCopyBtn.addEventListener('click', async () => {
+      if (!cleanupResultText.value) return;
+      await navigator.clipboard.writeText(cleanupResultText.value);
+      const orig = cleanupCopyBtn.textContent;
+      cleanupCopyBtn.textContent = 'Kopierat!';
+      setTimeout(() => { cleanupCopyBtn.textContent = orig; }, 1500);
+    });
+
+    cleanupDownloadBtn.addEventListener('click', () => {
+      if (!cleanupResultText.value) return;
+      const blob = new Blob([cleanupResultText.value], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (currentFilename.replace(/\.[^.]+$/, '') || 'protokoll') + '_protokoll.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
   </script>
 </body>
 </html>

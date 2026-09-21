@@ -1,6 +1,7 @@
 flask
 faster-whisper
 gunicorn
+anthropic
 
 # Speaker diarization. CPU-only torch build to avoid pulling in unused CUDA
 # wheels (they're huge and this app never touches a GPU).
