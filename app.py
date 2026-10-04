@@ -127,9 +127,15 @@ def get_diarization_pipeline():
             # so we only pay for it once diarization is actually requested.
             import torch
             from pyannote.audio import Pipeline
+            from pyannote.audio.core.task import Problem, Resolution, Specifications
+            from torch.torch_version import TorchVersion
 
             torch.set_num_threads(CPU_THREADS)
-            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=HF_TOKEN)
+            # torch>=2.6 defaults torch.load to weights_only=True, which rejects
+            # these classes stored in pyannote's checkpoints. Allowlist just them
+            # rather than disabling the check altogether.
+            with torch.serialization.safe_globals([TorchVersion, Problem, Resolution, Specifications]):
+                pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=HF_TOKEN)
             pipeline.to(torch.device("cpu"))
             _models[DIARIZATION_KEY] = pipeline
         _last_used[DIARIZATION_KEY] = time.monotonic()
