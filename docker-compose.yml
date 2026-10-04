@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3005:3005"
+      - "127.0.0.1:3005:3005"
     volumes:
       - whisper_models:/models
       - hf_cache:/root/.cache/huggingface
