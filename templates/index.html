@@ -37,17 +37,6 @@
       font-size: 0.95rem;
     }
 
-    .badge {
-      display: inline-block;
-      margin-top: 0.5rem;
-      background: #1e1e2e;
-      border: 1px solid #2a2a38;
-      border-radius: 20px;
-      padding: 0.2rem 0.7rem;
-      font-size: 0.75rem;
-      color: #7c6fff;
-    }
-
     .layout {
       display: flex;
       gap: 1.5rem;
@@ -188,23 +177,6 @@
       display: block;
       margin-bottom: 0.35rem;
     }
-
-    select {
-      width: 100%;
-      background: #1e1e2e;
-      border: 1px solid #2a2a38;
-      border-radius: 8px;
-      color: #e8e8f0;
-      padding: 0.55rem 0.75rem;
-      font-size: 0.9rem;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 0.75rem center;
-      cursor: pointer;
-    }
-
-    select:focus { outline: none; border-color: #7c6fff; }
 
     button.action-btn {
       width: 100%;
@@ -347,21 +319,6 @@
     .seg-time { color: #7c6fff; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 90px; }
     .seg-text { color: #ccc; }
     .seg-speaker { font-weight: 700; margin-right: 0.4rem; }
-
-    .checkbox-row {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      background: #1e1e2e;
-      border: 1px solid #2a2a38;
-      border-radius: 10px;
-      padding: 0.65rem 0.9rem;
-      cursor: pointer;
-    }
-
-    .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
-    .checkbox-row .cr-label { font-size: 0.85rem; color: #e8e8f0; }
-    .checkbox-row .cr-desc { font-size: 0.75rem; color: #666; margin-top: 0.1rem; }
 
     footer {
       margin-top: 2rem;
@@ -550,7 +507,6 @@
   <header>
     <h1>Transkri<span>bera</span></h1>
     <p class="subtitle">Lokal AI-transkription av ljud &amp; video</p>
-    <span class="badge">Whisper &middot; körs lokalt</span>
   </header>
 
   <div class="layout">
@@ -558,7 +514,7 @@
       <div class="drop-zone" id="dropZone">
         <span class="drop-icon">🎙️</span>
         <p class="drop-label"><strong>Klicka eller dra hit filer</strong></p>
-        <p class="drop-label"><small>MP3, MP4, WAV, M4A, OGG, FLAC, MKV, WEBM… (flera filer i taget)</small></p>
+        <p class="drop-label"><small>Ljud eller video &middot; transkriberingen startar direkt</small></p>
         <input type="file" id="fileInput" multiple
           accept=".mp3,.mp4,.wav,.m4a,.ogg,.flac,.webm,.mkv,.avi,.mov,.wma,.aac,audio/*,video/*" />
       </div>
@@ -569,35 +525,10 @@
           <span class="rec-timer" id="recordTimer"></span>
           <div class="rec-level"><div id="recordLevel"></div></div>
         </div>
-        <div class="rec-hint" id="recordHint">Spela in direkt i webbläsaren &ndash; texten transkriberas medan du pratar. Talare identifieras när du stoppar.</div>
+        <div class="rec-hint" id="recordHint">Spela in direkt i webbläsaren &ndash; texten transkriberas medan du pratar.</div>
       </div>
 
       <div class="queue-list" id="queueList"></div>
-
-      <div>
-        <label class="field-label" for="langSelect">Språk</label>
-        <select id="langSelect">
-          <option value="auto">Automatisk igenkänning</option>
-          <option value="sv" selected>Svenska</option>
-          <option value="en">Engelska</option>
-          <option value="no">Norska</option>
-          <option value="da">Danska</option>
-          <option value="fi">Finska</option>
-          <option value="de">Tyska</option>
-          <option value="fr">Franska</option>
-          <option value="es">Spanska</option>
-        </select>
-      </div>
-
-      <label class="checkbox-row">
-        <input type="checkbox" id="diarizeCheck" />
-        <span>
-          <div class="cr-label">Identifiera talare</div>
-          <div class="cr-desc">Färgkodar olika röster &middot; tar längre tid</div>
-        </span>
-      </label>
-
-      <button class="action-btn" id="transcribeBtn" disabled>Starta transkribering</button>
 
       <p class="status" id="status"></p>
     </div>
@@ -613,7 +544,7 @@
         </div>
       </div>
 
-      <div class="download-all-bar">
+      <div class="download-all-bar" id="downloadAllBar" style="display:none">
         <span class="dab-label">Ladda ner alla klara filer som zip:</span>
         <button class="icon-btn" id="zipTxtBtn" disabled>Alla .txt (.zip)</button>
         <button class="icon-btn" id="zipSrtBtn" disabled>Alla .srt (.zip)</button>
@@ -654,8 +585,6 @@
     const dropZone       = document.getElementById('dropZone');
     const fileInput      = document.getElementById('fileInput');
     const queueListEl    = document.getElementById('queueList');
-    const langSelect     = document.getElementById('langSelect');
-    const transcribeBtn  = document.getElementById('transcribeBtn');
     const statusEl       = document.getElementById('status');
     const resultText     = document.getElementById('resultText');
     const resultMeta     = document.getElementById('resultMeta');
@@ -664,9 +593,9 @@
     const srtBtn         = document.getElementById('srtBtn');
     const zipTxtBtn      = document.getElementById('zipTxtBtn');
     const zipSrtBtn      = document.getElementById('zipSrtBtn');
+    const downloadAllBar = document.getElementById('downloadAllBar');
     const segmentsToggle = document.getElementById('segmentsToggle');
     const segmentsBox    = document.getElementById('segmentsBox');
-    const diarizeCheck   = document.getElementById('diarizeCheck');
     const cleanupBtn         = document.getElementById('cleanupBtn');
     const cleanupSection     = document.getElementById('cleanupSection');
     const cleanupResultText  = document.getElementById('cleanupResultText');
@@ -742,12 +671,7 @@
         });
       }
       renderQueue();
-      updateStartButton();
-    }
-
-    function updateStartButton() {
-      const hasWaiting = queueItems.some(it => it.status === 'waiting');
-      transcribeBtn.disabled = uploadRunning || !hasWaiting;
+      processQueue();
     }
 
     function renderQueue() {
@@ -758,7 +682,7 @@
         const icon = it.live ? '🎙️' : isVideo(it.filename) ? '🎬' : '🎵';
         const size = it.file ? fmtSize(it.file.size) : it.recordingBlob ? fmtSize(it.recordingBlob.size) : '';
         const statusClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error' : '';
-        const canRemove = it.status === 'waiting';
+        const canRemove = !busy;
         return `
           <div class="queue-row ${rowClass}" data-id="${it.id}">
             <span class="qf-icon">${icon}</span>
@@ -778,9 +702,10 @@
     }
 
     function updateZipButtons() {
-      const anyDone = queueItems.some(it => it.status === 'done');
-      zipTxtBtn.disabled = !anyDone;
-      zipSrtBtn.disabled = !anyDone;
+      const doneCount = queueItems.filter(it => it.status === 'done').length;
+      zipTxtBtn.disabled = !doneCount;
+      zipSrtBtn.disabled = !doneCount;
+      downloadAllBar.style.display = doneCount > 1 ? '' : 'none';
     }
 
     queueListEl.addEventListener('click', (e) => {
@@ -795,7 +720,6 @@
       if (action === 'remove') {
         queueItems = queueItems.filter(it => it.id !== id);
         renderQueue();
-        updateStartButton();
       } else if (action === 'view') {
         showItemResult(item);
       } else if (action === 'txt') {
@@ -876,34 +800,26 @@
       if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
     });
 
-    transcribeBtn.addEventListener('click', async () => {
-      const waiting = queueItems.filter(it => it.status === 'waiting');
-      if (!waiting.length || uploadRunning) return;
-
+    // Uploads waiting files one at a time as soon as they are added; files
+    // added while an upload is running are picked up by the same loop.
+    async function processQueue() {
+      if (uploadRunning) return;
       uploadRunning = true;
-      transcribeBtn.disabled = true;
-      const language = langSelect.value;
-      const diarize = diarizeCheck.checked;
-
-      setStatus('loading', `<span class="spinner"></span>Laddar upp ${waiting.length} fil(er)…`);
-
-      for (const item of waiting) {
+      let item;
+      while ((item = queueItems.find(it => it.status === 'waiting'))) {
         try {
-          await uploadAndEnqueue(item, language, diarize);
+          await uploadAndEnqueue(item);
+          startPolling();
         } catch (err) {
           item.status = 'error';
           item.statusText = err.message || 'Uppladdningsfel';
           renderQueue();
         }
       }
-
-      setStatus('', '');
       uploadRunning = false;
-      updateStartButton();
-      startPolling();
-    });
+    }
 
-    async function uploadAndEnqueue(item, language, diarize) {
+    async function uploadAndEnqueue(item) {
       const file = item.file;
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
       const uploadId = crypto.randomUUID();
@@ -934,7 +850,7 @@
       const res = await fetch('/transcribe-assembled', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId, language, diarize }),
+        body: JSON.stringify({ upload_id: uploadId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Serverfel');
@@ -992,7 +908,7 @@
       const speakerCount = data.speaker_colors ? Object.keys(data.speaker_colors).length : 0;
       resultMeta.innerHTML =
         `<span>Fil: <span>${escHtml(currentFilename)}</span></span>` +
-        `<span>Detekterat språk: <span>${lang}</span></span>` +
+        `<span>Språk: <span>${lang}</span></span>` +
         (dur ? `<span>Längd: <span>${dur}</span></span>` : '') +
         (speakerCount ? `<span>Talare: <span>${speakerCount}</span></span>` : '');
 
@@ -1229,10 +1145,7 @@
         const res = await fetch('/live/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            language: langSelect.value,
-            diarize: diarizeCheck.checked,
-          }),
+          body: '{}',
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Serverfel');

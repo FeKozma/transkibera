@@ -7,16 +7,18 @@ get a transcript back in the browser, and export it as SRT.
 ## Features
 
 - Drag-and-drop upload of common audio/video formats (mp3, mp4, wav, m4a,
-  ogg, flac, webm, mkv, avi, mov, wma, aac, and more)
+  ogg, flac, webm, mkv, avi, mov, wma, aac, and more); transcription starts
+  as soon as a file is added, and the spoken language is detected
+  automatically
 - Live recording straight from the browser microphone: the audio is
   streamed to the server and transcribed in ~20s chunks while you're still
-  talking, so only the last chunk (plus speaker identification, if enabled)
+  talking, so only the last chunk (plus speaker identification)
   remains when you press stop. The recording itself can be downloaded too
 - Uses Whisper `large-v3-turbo`, which on CPU is both more accurate and
   about 1.75x faster than `medium`; the model isn't user-selectable
 - Uploaded files are transcribed with faster-whisper's batched pipeline,
   and the transcript and a progress percentage show up while it runs
-- Optional speaker diarization via
+- Speaker diarization via
   [pyannote.audio](https://github.com/pyannote/pyannote-audio) — labels
   each segment with the speaker it overlaps most, color-coded consistently
   in both the web preview and the exported SRT
@@ -40,7 +42,8 @@ The app listens on port 3005 by default (see `docker-compose.yml`).
 
 ### Speaker diarization
 
-Diarization is optional and off by default. To enable it:
+Diarization runs on every transcription when `HF_TOKEN` is set, and is
+skipped otherwise. To enable it:
 
 1. Accept the gated model terms on Hugging Face for
    [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1)

@@ -351,8 +351,10 @@ def _live_transcribe_chunk(session: dict, audio: np.ndarray, final: bool) -> int
     )
     segments = list(segments)
     _touch_model()
-    if session["language"] is None:
+    if session["language"] is None and segments:
         # Lock in the detected language so later chunks don't flip-flop.
+        # Chunks with only silence say nothing about the language, so wait
+        # for one with speech.
         session["language"] = info.language
         session["detected_language"] = info.language
 
@@ -472,12 +474,11 @@ def upload_chunk():
 def transcribe_assembled():
     upload_id   = request.json.get("upload_id")
     language    = request.json.get("language") or None
-    diarize_flag = bool(request.json.get("diarize"))
+    # Speakers are always identified when the server is set up for it.
+    diarize_flag = bool(HF_TOKEN)
 
     if language == "auto":
         language = None
-    if diarize_flag and not HF_TOKEN:
-        return jsonify({"error": "Talaridentifiering är inte konfigurerad på servern (HF_TOKEN saknas)"}), 400
 
     info = pending_uploads.pop(upload_id, None)
     if not info:
@@ -503,12 +504,10 @@ def transcribe_assembled():
 def live_start():
     data = request.json or {}
     language = data.get("language") or None
-    diarize_flag = bool(data.get("diarize"))
+    diarize_flag = bool(HF_TOKEN)
 
     if language == "auto":
         language = None
-    if diarize_flag and not HF_TOKEN:
-        return jsonify({"error": "Talaridentifiering är inte konfigurerad på servern (HF_TOKEN saknas)"}), 400
 
     tmp = tempfile.NamedTemporaryFile(suffix=".pcm", delete=False)
     tmp.close()
