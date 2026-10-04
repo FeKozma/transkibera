@@ -10,9 +10,11 @@ services:
     environment:
       - WHISPER_MODEL=medium
       - WHISPER_COMPUTE=int8
-      - WHISPER_CPU_THREADS=1
+      # Match the cpus limit below. 6 of the host's 8 cores, leaving headroom
+      # for the other apps on the box.
+      - WHISPER_CPU_THREADS=6
       - WHISPER_IDLE_UNLOAD_SECONDS=600
-      - OMP_NUM_THREADS=1
+      - OMP_NUM_THREADS=6
       # Speaker diarization (pyannote.audio). Requires a Hugging Face token
       # with access accepted on huggingface.co/pyannote/speaker-diarization-3.1
       # and .../segmentation-3.0. Left unset here, diarization is disabled.
@@ -20,8 +22,9 @@ services:
       # "Skapa protokoll" meeting-protocol generation, via the Anthropic API.
       # Left unset here, the button is disabled.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-    cpus: "1.0"
-    mem_limit: "3g"
+    cpus: "6.0"
+    # Room for large-v3-turbo plus the pyannote diarization pipeline in memory.
+    mem_limit: "8g"
     mem_reservation: "256m"
 
 volumes:
