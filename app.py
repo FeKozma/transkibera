@@ -23,13 +23,15 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".mkv", ".avi", ".mov", ".wma", ".aac",
 }
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv", ".ts", ".mts"}
-ALLOWED_MODELS = {"base", "medium", "large-v3-turbo"}
+# large-v3-turbo is both more accurate and ~1.75x faster than "medium" on
+# this CPU, so it is the only model offered; not user-selectable.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
 # Runs transcription on a single CPU thread by default so a job can't hog every
 # core on the (shared) host. Slower per job, much lighter on the machine.
 CPU_THREADS = int(os.environ.get("WHISPER_CPU_THREADS", "1"))
 # Unload cached models after this many seconds of inactivity to free the RAM
-# they hold while idle (a "medium" model alone is ~1.5GB).
+# they hold while idle (large-v3-turbo alone is ~1.6GB).
 IDLE_UNLOAD_SECONDS = int(os.environ.get("WHISPER_IDLE_UNLOAD_SECONDS", "600"))
 MODELS_DIR = "/models"
 # Uploaded files are transcribed with faster-whisper's batched pipeline, which
@@ -78,7 +80,8 @@ job_queue: "queue.Queue[tuple]" = queue.Queue()
 live_sessions: dict[str, dict] = {}
 
 
-def get_model(model_name: str) -> WhisperModel:
+def get_model() -> WhisperModel:
+    model_name = WHISPER_MODEL
     with _models_lock:
         if model_name not in _models:
             _models[model_name] = WhisperModel(
@@ -93,7 +96,7 @@ def get_model(model_name: str) -> WhisperModel:
     return _models[model_name]
 
 
-def _touch_model(model_name: str) -> None:
+def _touch_model(model_name: str = WHISPER_MODEL) -> None:
     with _models_lock:
         _last_used[model_name] = time.monotonic()
 
@@ -207,7 +210,7 @@ def _segment_dict(start: float, end: float, text: str) -> dict:
     return {"start": _fmt(start), "end": _fmt(end), "start_s": start, "end_s": end, "text": text.strip()}
 
 
-def _finished_job(lines: list[dict], language: str, duration: float, model_name: str, speaker_colors: dict) -> dict:
+def _finished_job(lines: list[dict], language: str, duration: float, speaker_colors: dict) -> dict:
     text = "\n".join(
         (f"{s['speaker']}: {s['text']}" if s.get("speaker") else s["text"]) for s in lines
     )
@@ -217,12 +220,11 @@ def _finished_job(lines: list[dict], language: str, duration: float, model_name:
         "segments": lines,
         "language": language,
         "duration": round(duration, 1),
-        "model": model_name,
         "speaker_colors": speaker_colors,
     }
 
 
-def run_transcription(job_id: str, file_path: str, language: str | None, model_name: str, is_video: bool, diarize_flag: bool = False):
+def run_transcription(job_id: str, file_path: str, language: str | None, is_video: bool, diarize_flag: bool = False):
     audio_path = None
     jobs[job_id]["status"] = "processing"
     try:
@@ -234,7 +236,7 @@ def run_transcription(job_id: str, file_path: str, language: str | None, model_n
             transcribe_path = file_path
 
         jobs[job_id]["status_text"] = "Transkriberar…"
-        model = get_model(model_name)
+        model = get_model()
         segments, info = BatchedInferencePipeline(model).transcribe(
             transcribe_path,
             language=language or None,
@@ -255,7 +257,7 @@ def run_transcription(job_id: str, file_path: str, language: str | None, model_n
             if info.duration:
                 pct = min(99, int(s.end / info.duration * 100))
                 jobs[job_id]["status_text"] = f"Transkriberar… {pct}%"
-        _touch_model(model_name)
+        _touch_model()
 
         speaker_colors: dict[str, str] = {}
         if diarize_flag and lines:
@@ -263,7 +265,7 @@ def run_transcription(job_id: str, file_path: str, language: str | None, model_n
             turns = diarize(transcribe_path)
             speaker_colors = _assign_speakers(lines, turns)
 
-        jobs[job_id] = _finished_job(lines, info.language, info.duration, model_name, speaker_colors)
+        jobs[job_id] = _finished_job(lines, info.language, info.duration, speaker_colors)
     except Exception as e:
         jobs[job_id] = {"status": "error", "error": str(e)}
     finally:
@@ -316,9 +318,9 @@ def _sanitize_filename(name: str, ext: str) -> str:
 
 def _queue_worker():
     while True:
-        job_id, file_path, language, model_name, is_video, diarize_flag = job_queue.get()
+        job_id, file_path, language, is_video, diarize_flag = job_queue.get()
         try:
-            run_transcription(job_id, file_path, language, model_name, is_video, diarize_flag)
+            run_transcription(job_id, file_path, language, is_video, diarize_flag)
         finally:
             job_queue.task_done()
 
@@ -331,7 +333,7 @@ def _live_transcribe_chunk(session: dict, audio: np.ndarray, final: bool) -> int
     to the job. Unless this is the final pass, the last segment is held back
     (it may be cut off mid-sentence) and re-transcribed with the next chunk.
     Returns the number of samples that were committed."""
-    model = get_model(session["model"])
+    model = get_model()
     segments, info = model.transcribe(
         audio,
         language=session["language"],
@@ -342,7 +344,7 @@ def _live_transcribe_chunk(session: dict, audio: np.ndarray, final: bool) -> int
         initial_prompt=session["prompt"] or None,
     )
     segments = list(segments)
-    _touch_model(session["model"])
+    _touch_model()
     if session["language"] is None:
         # Lock in the detected language so later chunks don't flip-flop.
         session["language"] = info.language
@@ -416,7 +418,7 @@ def _live_worker(job_id: str) -> None:
             speaker_colors = _assign_speakers(lines, turns)
 
         language = session.get("detected_language") or session["language"] or ""
-        jobs[job_id] = _finished_job(lines, language, duration, session["model"], speaker_colors)
+        jobs[job_id] = _finished_job(lines, language, duration, speaker_colors)
     except Exception as e:
         jobs[job_id] = {"status": "error", "error": str(e)}
     finally:
@@ -464,13 +466,10 @@ def upload_chunk():
 def transcribe_assembled():
     upload_id   = request.json.get("upload_id")
     language    = request.json.get("language") or None
-    model_name  = request.json.get("model", "large-v3-turbo")
     diarize_flag = bool(request.json.get("diarize"))
 
     if language == "auto":
         language = None
-    if model_name not in ALLOWED_MODELS:
-        return jsonify({"error": "Okänd modell"}), 400
     if diarize_flag and not HF_TOKEN:
         return jsonify({"error": "Talaridentifiering är inte konfigurerad på servern (HF_TOKEN saknas)"}), 400
 
@@ -486,11 +485,10 @@ def transcribe_assembled():
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         "status": "queued",
-        "model": model_name,
         "status_text": f"Väntar i kö ({job_queue.qsize() + 1})…",
     }
 
-    job_queue.put((job_id, info["path"], language, model_name, is_video, diarize_flag))
+    job_queue.put((job_id, info["path"], language, is_video, diarize_flag))
 
     return jsonify({"job_id": job_id})
 
@@ -499,13 +497,10 @@ def transcribe_assembled():
 def live_start():
     data = request.json or {}
     language = data.get("language") or None
-    model_name = data.get("model", "large-v3-turbo")
     diarize_flag = bool(data.get("diarize"))
 
     if language == "auto":
         language = None
-    if model_name not in ALLOWED_MODELS:
-        return jsonify({"error": "Okänd modell"}), 400
     if diarize_flag and not HF_TOKEN:
         return jsonify({"error": "Talaridentifiering är inte konfigurerad på servern (HF_TOKEN saknas)"}), 400
 
@@ -515,12 +510,10 @@ def live_start():
     jobs[job_id] = {
         "status": "recording",
         "status_text": "Spelar in…",
-        "model": model_name,
         "segments": [],
     }
     live_sessions[job_id] = {
         "job_id": job_id,
-        "model": model_name,
         "language": language,
         "diarize": diarize_flag,
         "pcm_path": tmp.name,

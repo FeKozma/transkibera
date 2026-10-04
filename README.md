@@ -12,9 +12,8 @@ get a transcript back in the browser, and export it as SRT.
   streamed to the server and transcribed in ~20s chunks while you're still
   talking, so only the last chunk (plus speaker identification, if enabled)
   remains when you press stop. The recording itself can be downloaded too
-- Choice of Whisper model size (`base`, `medium`, `large-v3-turbo`).
-  `large-v3-turbo` is the default: on CPU it is both more accurate and
-  about 1.75x faster than `medium`
+- Uses Whisper `large-v3-turbo`, which on CPU is both more accurate and
+  about 1.75x faster than `medium`; the model isn't user-selectable
 - Uploaded files are transcribed with faster-whisper's batched pipeline,
   and the transcript and a progress percentage show up while it runs
 - Optional speaker diarization via
@@ -76,7 +75,7 @@ Environment variables (set in `docker-compose.yml`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `WHISPER_MODEL` | `medium` | Default Whisper model to load |
+| `WHISPER_MODEL` | `large-v3-turbo` | Whisper model used for all transcription |
 | `WHISPER_COMPUTE` | `int8` | faster-whisper compute type |
 | `WHISPER_CPU_THREADS` | `1` | CPU threads per transcription job |
 | `WHISPER_IDLE_UNLOAD_SECONDS` | `600` | Seconds of inactivity before unloading a model |

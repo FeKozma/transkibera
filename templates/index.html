@@ -369,72 +369,6 @@
       font-size: 0.78rem;
     }
 
-    .model-picker {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .model-option {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      background: #1e1e2e;
-      border: 1px solid #2a2a38;
-      border-radius: 10px;
-      padding: 0.65rem 0.9rem;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-
-    .model-option:has(input:checked) {
-      border-color: #7c6fff;
-      background: #1a1a2e;
-    }
-
-    .model-option input[type="radio"] { display: none; }
-
-    .model-dot {
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      border: 2px solid #444;
-      flex-shrink: 0;
-      transition: border-color 0.15s, background 0.15s;
-    }
-
-    .model-option:has(input:checked) .model-dot {
-      border-color: #7c6fff;
-      background: #7c6fff;
-    }
-
-    .model-info { flex: 1; min-width: 0; }
-
-    .model-name {
-      font-size: 0.88rem;
-      font-weight: 600;
-      color: #e8e8f0;
-    }
-
-    .model-desc {
-      font-size: 0.75rem;
-      color: #666;
-      margin-top: 0.1rem;
-    }
-
-    .model-speed {
-      font-size: 0.72rem;
-      padding: 0.15rem 0.45rem;
-      border-radius: 20px;
-      background: #12121a;
-      border: 1px solid #2a2a38;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    .speed-fast { color: #4ade80; border-color: #1a3a2a; background: #0d1f15; }
-    .speed-mid  { color: #facc15; border-color: #3a3010; background: #1f1c0d; }
-    .speed-slow { color: #f87171; border-color: #3a1515; background: #1f0d0d; }
-
     @media (max-width: 760px) {
       .layout { flex-direction: column; }
       .upload-col { flex: none; width: 100%; }
@@ -639,39 +573,6 @@
       </div>
 
       <div class="queue-list" id="queueList"></div>
-
-      <div>
-        <label class="field-label">Modell</label>
-        <div class="model-picker">
-          <label class="model-option">
-            <input type="radio" name="model" value="base" />
-            <span class="model-dot"></span>
-            <span class="model-info">
-              <div class="model-name">Snabb</div>
-              <div class="model-desc">base &middot; 145 MB &middot; snabbast, lägre precision</div>
-            </span>
-            <span class="model-speed speed-fast">Snabbast</span>
-          </label>
-          <label class="model-option">
-            <input type="radio" name="model" value="medium" />
-            <span class="model-dot"></span>
-            <span class="model-info">
-              <div class="model-name">Medel</div>
-              <div class="model-desc">medium &middot; 1.5 GB &middot; äldre, långsammare än Bäst</div>
-            </span>
-            <span class="model-speed speed-slow">Långsam</span>
-          </label>
-          <label class="model-option">
-            <input type="radio" name="model" value="large-v3-turbo" checked />
-            <span class="model-dot"></span>
-            <span class="model-info">
-              <div class="model-name">Bäst</div>
-              <div class="model-desc">large-v3-turbo &middot; 1.6 GB &middot; bäst kvalitet, rekommenderas</div>
-            </span>
-            <span class="model-speed speed-mid">Snabb</span>
-          </label>
-        </div>
-      </div>
 
       <div>
         <label class="field-label" for="langSelect">Språk</label>
@@ -981,7 +882,6 @@
 
       uploadRunning = true;
       transcribeBtn.disabled = true;
-      const model = document.querySelector('input[name="model"]:checked')?.value || 'large-v3-turbo';
       const language = langSelect.value;
       const diarize = diarizeCheck.checked;
 
@@ -989,7 +889,7 @@
 
       for (const item of waiting) {
         try {
-          await uploadAndEnqueue(item, model, language, diarize);
+          await uploadAndEnqueue(item, language, diarize);
         } catch (err) {
           item.status = 'error';
           item.statusText = err.message || 'Uppladdningsfel';
@@ -1003,7 +903,7 @@
       startPolling();
     });
 
-    async function uploadAndEnqueue(item, model, language, diarize) {
+    async function uploadAndEnqueue(item, language, diarize) {
       const file = item.file;
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
       const uploadId = crypto.randomUUID();
@@ -1034,7 +934,7 @@
       const res = await fetch('/transcribe-assembled', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId, language, model, diarize }),
+        body: JSON.stringify({ upload_id: uploadId, language, diarize }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Serverfel');
@@ -1089,14 +989,11 @@
         fi: 'finska', de: 'tyska', fr: 'franska', es: 'spanska' };
       const lang = langName[data.language] || data.language || '?';
       const dur = data.duration ? fmtDuration(data.duration) : '';
-      const modelLabels = { base: 'Snabb', medium: 'Medel', 'large-v3-turbo': 'Bäst' };
-      const usedModel = modelLabels[data.model] || data.model || '';
       const speakerCount = data.speaker_colors ? Object.keys(data.speaker_colors).length : 0;
       resultMeta.innerHTML =
         `<span>Fil: <span>${escHtml(currentFilename)}</span></span>` +
         `<span>Detekterat språk: <span>${lang}</span></span>` +
         (dur ? `<span>Längd: <span>${dur}</span></span>` : '') +
-        (usedModel ? `<span>Modell: <span>${usedModel}</span></span>` : '') +
         (speakerCount ? `<span>Talare: <span>${speakerCount}</span></span>` : '');
 
       segmentsBox.classList.remove('open');
@@ -1333,7 +1230,6 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: document.querySelector('input[name="model"]:checked')?.value || 'large-v3-turbo',
             language: langSelect.value,
             diarize: diarizeCheck.checked,
           }),
