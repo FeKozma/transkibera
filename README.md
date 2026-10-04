@@ -8,7 +8,15 @@ get a transcript back in the browser, and export it as SRT.
 
 - Drag-and-drop upload of common audio/video formats (mp3, mp4, wav, m4a,
   ogg, flac, webm, mkv, avi, mov, wma, aac, and more)
-- Choice of Whisper model size (`base`, `medium`, `large-v3-turbo`)
+- Live recording straight from the browser microphone: the audio is
+  streamed to the server and transcribed in ~20s chunks while you're still
+  talking, so only the last chunk (plus speaker identification, if enabled)
+  remains when you press stop. The recording itself can be downloaded too
+- Choice of Whisper model size (`base`, `medium`, `large-v3-turbo`).
+  `large-v3-turbo` is the default: on CPU it is both more accurate and
+  about 1.75x faster than `medium`
+- Uploaded files are transcribed with faster-whisper's batched pipeline,
+  and the transcript and a progress percentage show up while it runs
 - Optional speaker diarization via
   [pyannote.audio](https://github.com/pyannote/pyannote-audio) — labels
   each segment with the speaker it overlaps most, color-coded consistently
@@ -72,6 +80,9 @@ Environment variables (set in `docker-compose.yml`):
 | `WHISPER_COMPUTE` | `int8` | faster-whisper compute type |
 | `WHISPER_CPU_THREADS` | `1` | CPU threads per transcription job |
 | `WHISPER_IDLE_UNLOAD_SECONDS` | `600` | Seconds of inactivity before unloading a model |
+| `WHISPER_BATCH_SIZE` | `8` | Batch size for transcribing uploaded files |
+| `LIVE_CHUNK_SECONDS` | `20` | How much new audio a live recording collects before each transcription pass |
+| `LIVE_MAX_SECONDS` | `14400` | Maximum length of a live recording |
 | `HF_TOKEN` | unset | Hugging Face token, required for diarization |
 | `ANTHROPIC_API_KEY` | unset | Anthropic API key, required for the "Skapa protokoll" button |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model used to write the meeting protocol |

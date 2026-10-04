@@ -8,7 +8,7 @@ services:
       - whisper_models:/models
       - hf_cache:/root/.cache/huggingface
     environment:
-      - WHISPER_MODEL=medium
+      - WHISPER_MODEL=large-v3-turbo
       - WHISPER_COMPUTE=int8
       # Match the cpus limit below. 6 of the host's 8 cores, leaving headroom
       # for the other apps on the box.

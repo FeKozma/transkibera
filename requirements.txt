@@ -1,5 +1,6 @@
 flask
 faster-whisper
+numpy
 # PyAV 19 removed av.open(metadata_errors=...), which faster-whisper 1.2.x
 # still passes when decoding audio ("open() got an unexpected keyword argument").
 av<19

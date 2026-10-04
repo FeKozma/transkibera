@@ -568,6 +568,48 @@
     button.secondary-btn:hover { border-color: #7c6fff; color: #e8e8f0; }
 
     button.action-btn.inline { width: auto; padding: 0.6rem 1.2rem; }
+
+    .record-box {
+      border: 1px solid #2a2a38;
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .record-box.recording { border-color: #f87171; background: #1f1215; }
+
+    .record-row { display: flex; align-items: center; gap: 0.9rem; }
+
+    button.record-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      background: #1e1e2e;
+      border: 1px solid #3a3a50;
+      color: #e8e8f0;
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    button.record-btn:hover:not(:disabled) { border-color: #f87171; }
+    button.record-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #f87171; }
+    .record-box.recording .rec-dot { border-radius: 2px; animation: rec-pulse 1.2s ease-in-out infinite; }
+    @keyframes rec-pulse { 50% { opacity: 0.35; } }
+
+    .rec-timer { font-variant-numeric: tabular-nums; color: #e8e8f0; font-size: 0.95rem; min-width: 3.5rem; }
+
+    .rec-level { flex: 1; height: 6px; background: #2a2a38; border-radius: 3px; overflow: hidden; }
+    .rec-level div { height: 100%; width: 0; background: #4ade80; transition: width 0.1s linear; }
+
+    .rec-hint { font-size: 0.75rem; color: #666; }
   </style>
 </head>
 <body>
@@ -587,6 +629,15 @@
           accept=".mp3,.mp4,.wav,.m4a,.ogg,.flac,.webm,.mkv,.avi,.mov,.wma,.aac,audio/*,video/*" />
       </div>
 
+      <div class="record-box" id="recordBox">
+        <div class="record-row">
+          <button class="record-btn" id="recordBtn"><span class="rec-dot"></span><span id="recordLabel">Spela in</span></button>
+          <span class="rec-timer" id="recordTimer"></span>
+          <div class="rec-level"><div id="recordLevel"></div></div>
+        </div>
+        <div class="rec-hint" id="recordHint">Spela in direkt i webbläsaren &ndash; texten transkriberas medan du pratar. Talare identifieras när du stoppar.</div>
+      </div>
+
       <div class="queue-list" id="queueList"></div>
 
       <div>
@@ -597,27 +648,27 @@
             <span class="model-dot"></span>
             <span class="model-info">
               <div class="model-name">Snabb</div>
-              <div class="model-desc">base &middot; 145 MB &middot; snabb, lägre precision</div>
+              <div class="model-desc">base &middot; 145 MB &middot; snabbast, lägre precision</div>
             </span>
-            <span class="model-speed speed-fast">Snabb</span>
+            <span class="model-speed speed-fast">Snabbast</span>
           </label>
           <label class="model-option">
-            <input type="radio" name="model" value="medium" checked />
+            <input type="radio" name="model" value="medium" />
             <span class="model-dot"></span>
             <span class="model-info">
               <div class="model-name">Medel</div>
-              <div class="model-desc">medium &middot; 1.5 GB &middot; bra balans</div>
+              <div class="model-desc">medium &middot; 1.5 GB &middot; äldre, långsammare än Bäst</div>
             </span>
-            <span class="model-speed speed-mid">Medel</span>
+            <span class="model-speed speed-slow">Långsam</span>
           </label>
           <label class="model-option">
-            <input type="radio" name="model" value="large-v3-turbo" />
+            <input type="radio" name="model" value="large-v3-turbo" checked />
             <span class="model-dot"></span>
             <span class="model-info">
               <div class="model-name">Bäst</div>
-              <div class="model-desc">large-v3-turbo &middot; 1.6 GB &middot; bäst kvalitet</div>
+              <div class="model-desc">large-v3-turbo &middot; 1.6 GB &middot; bäst kvalitet, rekommenderas</div>
             </span>
-            <span class="model-speed speed-slow">Långsam</span>
+            <span class="model-speed speed-mid">Snabb</span>
           </label>
         </div>
       </div>
@@ -725,11 +776,17 @@
     const cleanupModalBody   = document.getElementById('cleanupModalBody');
     const cleanupModalFooter = document.getElementById('cleanupModalFooter');
     const cleanupModalClose  = document.getElementById('cleanupModalClose');
+    const recordBox          = document.getElementById('recordBox');
+    const recordBtn          = document.getElementById('recordBtn');
+    const recordLabel        = document.getElementById('recordLabel');
+    const recordTimer        = document.getElementById('recordTimer');
+    const recordLevel        = document.getElementById('recordLevel');
+    const recordHint         = document.getElementById('recordHint');
 
     const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.flv', '.ts', '.mts', '.m2ts']);
     const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
 
-    let queueItems = []; // { id, file, filename, ext, status, statusText, jobId, data, error }
+    let queueItems = []; // { id, file, filename, ext, status, statusText, jobId, data, error, live, recordingBlob }
     let currentJobId    = null;
     let currentFilename = '';
     let currentLanguage = '';
@@ -794,22 +851,24 @@
 
     function renderQueue() {
       queueListEl.innerHTML = queueItems.map(it => {
-        const rowClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error'
-          : (it.status === 'uploading' || it.status === 'queued' || it.status === 'processing') ? 'active' : '';
-        const spinner = (it.status === 'uploading' || it.status === 'queued' || it.status === 'processing')
-          ? '<span class="mini-spinner"></span>' : '';
+        const busy = ['uploading', 'queued', 'processing', 'recording'].includes(it.status);
+        const rowClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error' : busy ? 'active' : '';
+        const spinner = busy ? '<span class="mini-spinner"></span>' : '';
+        const icon = it.live ? '🎙️' : isVideo(it.filename) ? '🎬' : '🎵';
+        const size = it.file ? fmtSize(it.file.size) : it.recordingBlob ? fmtSize(it.recordingBlob.size) : '';
         const statusClass = it.status === 'done' ? 'done' : it.status === 'error' ? 'error' : '';
         const canRemove = it.status === 'waiting';
         return `
           <div class="queue-row ${rowClass}" data-id="${it.id}">
-            <span class="qf-icon">${isVideo(it.filename) ? '🎬' : '🎵'}</span>
+            <span class="qf-icon">${icon}</span>
             <span class="qf-name" title="${escHtml(it.filename)}">${escHtml(it.filename)}</span>
-            <span class="qf-size">${fmtSize(it.file.size)}</span>
+            <span class="qf-size">${size}</span>
             <span class="qf-status ${statusClass}">${spinner}${escHtml(it.statusText)}</span>
             <div class="qf-actions">
               <button class="qf-btn" data-action="view" ${it.status === 'done' ? '' : 'disabled'}>Visa</button>
               <button class="qf-btn" data-action="txt" ${it.status === 'done' ? '' : 'disabled'}>.txt</button>
               <button class="qf-btn" data-action="srt" ${it.status === 'done' ? '' : 'disabled'}>.srt</button>
+              ${it.live ? `<button class="qf-btn" data-action="audio" title="Ladda ner inspelningen" ${it.recordingBlob ? '' : 'disabled'}>Ljud</button>` : ''}
               <button class="qf-btn qf-remove" data-action="remove" ${canRemove ? '' : 'disabled'}>✕</button>
             </div>
           </div>`;
@@ -842,6 +901,8 @@
         downloadTxt(item);
       } else if (action === 'srt') {
         downloadSrt(item);
+      } else if (action === 'audio') {
+        downloadRecording(item);
       }
     });
 
@@ -864,6 +925,16 @@
       a.href = '/srt/' + item.jobId + '?filename=' + encodeURIComponent(filename);
       a.download = filename;
       a.click();
+    }
+
+    function downloadRecording(item) {
+      if (!item.recordingBlob) return;
+      const ext = item.recordingBlob.type.includes('mp4') ? '.m4a' : item.recordingBlob.type.includes('ogg') ? '.ogg' : '.webm';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(item.recordingBlob);
+      a.download = item.filename + ext;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
     function showItemResult(item) {
@@ -910,7 +981,7 @@
 
       uploadRunning = true;
       transcribeBtn.disabled = true;
-      const model = document.querySelector('input[name="model"]:checked')?.value || 'medium';
+      const model = document.querySelector('input[name="model"]:checked')?.value || 'large-v3-turbo';
       const language = langSelect.value;
       const diarize = diarizeCheck.checked;
 
@@ -977,7 +1048,7 @@
     function startPolling() {
       if (pollHandle) return;
       pollHandle = setInterval(async () => {
-        const pending = queueItems.filter(it => it.status === 'queued' || it.status === 'processing');
+        const pending = queueItems.filter(it => ['queued', 'processing', 'recording'].includes(it.status));
         if (!pending.length) {
           clearInterval(pollHandle);
           pollHandle = null;
@@ -992,13 +1063,14 @@
               item.status = 'done';
               item.statusText = '✓ Klar';
               item.data = d;
-              if (previewId === null) showItemResult(item);
+              if (previewId === null || previewId === item.id) showItemResult(item);
             } else if (d.status === 'error') {
               item.status = 'error';
               item.statusText = d.error || 'Fel';
             } else {
               item.status = d.status || item.status;
               item.statusText = d.status_text || item.statusText;
+              if (d.segments?.length && (previewId === null || previewId === item.id)) showPartial(item, d);
             }
           } catch (_) { /* keep previous state, try again next tick */ }
         }));
@@ -1043,6 +1115,23 @@
         segmentsToggle.style.display = 'none';
         segmentsBox.innerHTML = '';
       }
+    }
+
+    // Shows the transcript of a job that is still running (live recording, or
+    // a file whose segments arrive as they are decoded).
+    function showPartial(item, data) {
+      previewId = item.id;
+      currentFilename = item.filename;
+      const atBottom = resultText.scrollTop + resultText.clientHeight >= resultText.scrollHeight - 20;
+      resultText.value = data.segments.map(s => s.text).join('\n');
+      if (atBottom) resultText.scrollTop = resultText.scrollHeight;
+      resultMeta.innerHTML =
+        `<span>Fil: <span>${escHtml(item.filename)}</span></span>` +
+        `<span>${escHtml(data.status_text || '')}</span>`;
+      copyBtn.disabled = false;
+      downloadBtn.disabled = false;
+      srtBtn.disabled = true;
+      cleanupBtn.disabled = true;
     }
 
     segmentsToggle.addEventListener('click', () => {
@@ -1114,6 +1203,311 @@
         updateZipButtons();
       }
     }
+
+    // ---- Live recording --------------------------------------------------
+    // The microphone is captured with an AudioWorklet, downsampled to 16 kHz
+    // mono and streamed to the server as int16 PCM about once a second; the
+    // server transcribes it in ~20s chunks while recording continues. A
+    // MediaRecorder runs alongside so the audio itself can be downloaded.
+    const LIVE_RATE = 16000;
+
+    // Downsamples the mic signal to 16 kHz and hands over 0.1s blocks.
+    // Averaging the input samples that fall in each output sample is a crude
+    // low-pass, good enough for speech.
+    class Downsampler {
+      constructor(step, emit) {
+        this.step = step; // input samples per output sample
+        this.emit = emit;
+        this.pos = 0; this.acc = 0; this.n = 0;
+        this.out = new Float32Array(1600); this.len = 0;
+      }
+      push(ch) {
+        for (let i = 0; i < ch.length; i++) {
+          this.acc += ch[i]; this.n++; this.pos++;
+          if (this.pos >= this.step) {
+            this.pos -= this.step;
+            this.out[this.len++] = this.acc / this.n;
+            this.acc = 0; this.n = 0;
+            if (this.len === this.out.length) {
+              this.emit(this.out.slice(0));
+              this.len = 0;
+            }
+          }
+        }
+      }
+    }
+
+    const WORKLET_SRC = Downsampler.toString() + `
+      class PcmCapture extends AudioWorkletProcessor {
+        constructor(opts) {
+          super();
+          this.ds = new Downsampler(opts.processorOptions.step, (b) => this.port.postMessage(b));
+        }
+        process(inputs) {
+          const ch = inputs[0] && inputs[0][0];
+          if (ch) this.ds.push(ch);
+          return true;
+        }
+      }
+      registerProcessor('pcm-capture', PcmCapture);`;
+
+    let rec = null; // active recording state
+
+    function setRecordUI(state) {
+      recordBox.classList.toggle('recording', state === 'recording');
+      recordBtn.disabled = state === 'starting' || state === 'stopping';
+      recordLabel.textContent = { idle: 'Spela in', starting: 'Startar…', recording: 'Stoppa', stopping: 'Avslutar…' }[state];
+      if (state === 'idle') {
+        recordTimer.textContent = '';
+        recordLevel.style.width = '0';
+      }
+    }
+
+    function withTimeout(promise, ms) {
+      return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+    }
+
+    // Connects the mic stream to a capture node that calls onBlock with
+    // 16 kHz Float32 blocks. Returns the AudioContext (closing it stops capture).
+    async function openAudioGraph(stream, onBlock) {
+      // Prefer letting the browser resample to 16 kHz; some browsers refuse
+      // to connect a mic stream to a context at a different rate, so fall
+      // back to the native rate and downsample ourselves.
+      let ctx, source;
+      try {
+        ctx = new AudioContext({ sampleRate: LIVE_RATE });
+        source = ctx.createMediaStreamSource(stream);
+      } catch (_) {
+        if (ctx) ctx.close();
+        ctx = new AudioContext();
+        source = ctx.createMediaStreamSource(stream);
+      }
+      // A context created after the mic prompt may start suspended because
+      // the click that started the recording no longer counts as a gesture.
+      if (ctx.state === 'suspended') await withTimeout(ctx.resume(), 2000).catch(() => {});
+      const step = ctx.sampleRate / LIVE_RATE;
+
+      let node;
+      try {
+        const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+        await withTimeout(ctx.audioWorklet.addModule(url), 3000);
+        URL.revokeObjectURL(url);
+        node = new AudioWorkletNode(ctx, 'pcm-capture', { processorOptions: { step } });
+        node.port.onmessage = (e) => onBlock(e.data);
+      } catch (_) {
+        // AudioWorklet missing or not loading: use the older ScriptProcessor,
+        // which runs on the main thread but works everywhere.
+        const ds = new Downsampler(step, onBlock);
+        node = ctx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = (e) => ds.push(e.inputBuffer.getChannelData(0));
+      }
+      // Browsers only render nodes that lead to the output, so route the
+      // capture node there through a muted gain.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      source.connect(node);
+      node.connect(mute);
+      mute.connect(ctx.destination);
+      return ctx;
+    }
+
+    async function startRecording() {
+      if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorkletNode) {
+        setStatus('error', '✗ Webbläsaren stöder inte inspelning');
+        return;
+      }
+      setRecordUI('starting');
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch (err) {
+        setRecordUI('idle');
+        setStatus('error', '✗ Fick inte tillgång till mikrofonen');
+        return;
+      }
+
+      try {
+        const res = await fetch('/live/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: document.querySelector('input[name="model"]:checked')?.value || 'large-v3-turbo',
+            language: langSelect.value,
+            diarize: diarizeCheck.checked,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Serverfel');
+
+        // Captured audio collects here from the first block on, even before
+        // the rest of the recording state below is set up.
+        const capture = { pending: [], pendingLen: 0, level: 0 };
+        const ctx = await openAudioGraph(stream, (block) => {
+          capture.pending.push(block);
+          capture.pendingLen += block.length;
+          let peak = 0;
+          for (let i = 0; i < block.length; i++) peak = Math.max(peak, Math.abs(block[i]));
+          capture.level = Math.max(peak, capture.level * 0.85);
+        });
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const item = {
+          id: crypto.randomUUID(),
+          file: null,
+          live: true,
+          filename: `Inspelning ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}`,
+          ext: '.webm',
+          status: 'recording',
+          statusText: 'Spelar in…',
+          jobId: data.job_id,
+          data: null,
+          error: null,
+          recordingBlob: null,
+          speakerNames: {},
+          speakerHints: null,
+          meetingMeta: null,
+          summary: null,
+        };
+        queueItems.push(item);
+        previewId = item.id;
+        resultText.value = '';
+        resultMeta.innerHTML = '';
+        segmentsToggle.style.display = 'none';
+        segmentsBox.innerHTML = '';
+        cleanupSection.style.display = 'none';
+
+        rec = Object.assign(capture, {
+          item, stream, ctx,
+          seq: 0, sendChain: Promise.resolve(), failed: null,
+          startedAt: Date.now(),
+          recorder: null, recChunks: [], wakeLock: null,
+        });
+
+        if (window.MediaRecorder) {
+          try {
+            rec.recorder = new MediaRecorder(stream);
+            rec.recorder.ondataavailable = (e) => { if (e.data.size) rec.recChunks.push(e.data); };
+            rec.recorder.start(10000);
+          } catch (_) { rec.recorder = null; }
+        }
+        try { rec.wakeLock = await navigator.wakeLock?.request('screen'); } catch (_) {}
+
+        rec.flushTimer = setInterval(flushAudio, 1000);
+        rec.uiTimer = setInterval(() => {
+          recordTimer.textContent = fmtClock((Date.now() - rec.startedAt) / 1000);
+          recordLevel.style.width = Math.min(100, Math.round(rec.level * 140)) + '%';
+          rec.level *= 0.9;
+        }, 100);
+
+        setRecordUI('recording');
+        renderQueue();
+        startPolling();
+      } catch (err) {
+        stream.getTracks().forEach(t => t.stop());
+        rec = null;
+        setRecordUI('idle');
+        setStatus('error', '✗ ' + (err.message || 'Kunde inte starta inspelningen'));
+      }
+    }
+
+    function fmtClock(sec) {
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+      return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(s).padStart(2, '0');
+    }
+
+    // Packs captured audio into one int16 block and queues it for upload.
+    // Blocks are sent strictly in order; a failed send is retried a few
+    // times before the recording is aborted.
+    function flushAudio() {
+      if (!rec || !rec.pendingLen) return;
+      const pcm = new Int16Array(rec.pendingLen);
+      let o = 0;
+      for (const block of rec.pending) {
+        for (let i = 0; i < block.length; i++) {
+          const v = Math.max(-1, Math.min(1, block[i]));
+          pcm[o++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+        }
+      }
+      rec.pending = [];
+      rec.pendingLen = 0;
+      const seq = rec.seq++;
+      const { item } = rec;
+      const r = rec;
+      r.sendChain = r.sendChain.then(async () => {
+        if (r.failed) return;
+        let error = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (attempt) await new Promise(res => setTimeout(res, 1000 * 2 ** (attempt - 1)));
+          let res;
+          try {
+            res = await fetch(`/live/${item.jobId}/audio?seq=${seq}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: pcm.buffer,
+            });
+          } catch (err) {
+            error = new Error('Nätverksfel');
+            continue;
+          }
+          if (res.ok) return;
+          const d = await res.json().catch(() => ({}));
+          error = new Error(d.error || `Serverfel (${res.status})`);
+          if (res.status < 500) break;
+        }
+        r.failed = error;
+        stopRecording();
+      });
+    }
+
+    async function stopRecording() {
+      if (!rec || rec.stopping) return;
+      const r = rec;
+      r.stopping = true;
+      setRecordUI('stopping');
+      clearInterval(r.flushTimer);
+      clearInterval(r.uiTimer);
+
+      // Let the worklet hand over its last samples before tearing down.
+      await new Promise(res => setTimeout(res, 150));
+      flushAudio();
+      r.stream.getTracks().forEach(t => t.stop());
+      r.ctx.close();
+      try { r.wakeLock?.release(); } catch (_) {}
+
+      const recorded = new Promise(res => {
+        if (!r.recorder || r.recorder.state === 'inactive') return res();
+        r.recorder.onstop = res;
+        r.recorder.stop();
+      });
+
+      await r.sendChain;
+      await recorded;
+      if (r.recChunks.length) {
+        r.item.recordingBlob = new Blob(r.recChunks, { type: r.recorder.mimeType || 'audio/webm' });
+      }
+      rec = null;
+
+      if (r.failed) {
+        setStatus('error', '✗ Inspelningen avbröts: ' + r.failed.message
+          + (r.item.recordingBlob ? ' &ndash; ljudet kan laddas ner med "Ljud"-knappen.' : ''));
+      }
+      try {
+        await fetch(`/live/${r.item.jobId}/stop`, { method: 'POST' });
+      } catch (_) { /* the server finalizes idle sessions on its own */ }
+      r.item.status = 'processing';
+      r.item.statusText = 'Slutför transkribering…';
+      setRecordUI('idle');
+      renderQueue();
+      startPolling();
+    }
+
+    recordBtn.addEventListener('click', () => (rec ? stopRecording() : startRecording()));
+
+    window.addEventListener('beforeunload', (e) => {
+      if (rec) { e.preventDefault(); e.returnValue = ''; }
+    });
 
     zipTxtBtn.addEventListener('click', () => downloadZip('txt'));
     zipSrtBtn.addEventListener('click', () => downloadZip('srt'));
